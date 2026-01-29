@@ -6,9 +6,10 @@ class Config:
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file size
     
     # API Keys for Question Generation (Multiple providers for reliability)
-    ROUTER_API_KEY = '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'
-    DEEPSEEK_API_KEY = 'sk-3a919fe923304611b26e761853aa6863'
-    HUGGINGFACE_API_KEY = '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'
+    # Use environment variables: ROUTER_API_KEY, DEEPSEEK_API_KEY, HUGGINGFACE_API_KEY
+    ROUTER_API_KEY = os.getenv('ROUTER_API_KEY', '')
+    DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY', '')
+    HUGGINGFACE_API_KEY = os.getenv('HUGGINGFACE_API_KEY', '')
     HUGGINGFACE_API_URL = 'https://api-inference.huggingface.co/models'
     
     # Models for question generation and predictions
