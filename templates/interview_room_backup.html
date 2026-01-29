@@ -145,7 +145,7 @@
                         <div class="ai-speaking-indicator" id="aiSpeakingIndicator" style="display: none;">
                             <div class="ai-avatar">🤖</div>
                             <div class="ai-speech-bubble" id="aiSpeechBubble">
-                                <p id="aiQuestionText">{{ question.question|e if question else "Loading question..." }}</p>
+                                <p id="aiQuestionText">{{ question.question if question else "Loading question..." }}</p>
                             </div>
                         </div>
                         <div class="recording-indicator" id="recordingIndicator" style="display: none;">

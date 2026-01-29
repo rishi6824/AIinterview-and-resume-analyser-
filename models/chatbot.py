@@ -8,9 +8,9 @@ class InterviewChatbot:
     def _load_responses(self):
         return {
             'greeting': [
-                "Hello! I'm here to help you with your interview preparation. How can I assist you?",
-                "Hi there! Ready to practice for your interview? What would you like to know?",
-                "Welcome! I'm your interview coach. What questions do you have about the interview process?"
+                "Hello! I'm Rishi. How can I assist you?",
+                "Hi there! I'm Rishi. What would you like to know?",
+                "Welcome! I'm Rishi. What questions do you have?"
             ],
             'interview_tips': [
                 "Research the company thoroughly before the interview and understand their values and mission.",
@@ -43,8 +43,8 @@ class InterviewChatbot:
             'fallback': [
                 "I'm not sure I understand. Could you rephrase that?",
                 "That's an interesting question. Could you provide more context?",
-                "I'm here to help with interview preparation. Could you ask about interview tips, technical questions, or behavioral interviews?",
-                "Let me think about that. In the meantime, would you like tips on interview preparation?"
+                "I'm here to help. Could you ask about interview tips, technical questions, or behavioral interviews?",
+                "Let me think about that. In the meantime, would you like some tips?"
             ]
         }
     

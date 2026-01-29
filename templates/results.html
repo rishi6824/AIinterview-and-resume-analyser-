@@ -1,62 +1,164 @@
-{% extends "base.html" %}
+{% extends "base_interview.html" %}
 
-{% block title %}Interview Results{% endblock %}
+{% block title %}Thank You - Interview Complete{% endblock %}
 
 {% block content %}
-<div class="results-container">
+<div class="thank-you-container">
     <div class="container">
-        <div class="results-header">
-            <h2>Interview Results</h2>
-            <div class="overall-score">
-                <div class="score-circle">
-                    <span class="score">{{ "%.1f"|format(percentage) }}%</span>
-                </div>
-                <p>Overall Score</p>
-            </div>
-        </div>
-
-        <div class="results-summary">
-            <h3>Performance Summary</h3>
-            <div class="summary-stats">
-                <div class="stat">
-                    <span class="stat-value">{{ responses|length }}</span>
-                    <span class="stat-label">Questions Answered</span>
-                </div>
-                <div class="stat">
-                    <span class="stat-value">{{ "%.1f"|format(score) }}/{{ responses|length * 10 }}</span>
-                    <span class="stat-label">Total Score</span>
+        <div class="thank-you-card">
+            <div class="thank-you-animation">
+                <div class="checkmark-circle">
+                    <div class="checkmark"></div>
                 </div>
             </div>
-        </div>
-
-        {% if overall_feedback %}
-        <div class="overall-feedback">
-            <h3>Overall Feedback</h3>
-            <p>{{ overall_feedback }}</p>
-        </div>
-        {% endif %}
-
-        <div class="detailed-results">
-            <h3>Detailed Feedback</h3>
-            {% for response in responses %}
-            <div class="response-card">
-                <div class="response-header">
-                    <h4>Question {{ loop.index }}</h4>
-                    <span class="score-badge">{{ response.score }}/10</span>
-                </div>
-                <div class="response-content">
-                    <p><strong>Question:</strong> {{ response.question }}</p>
-                    <p><strong>Your Answer:</strong> {{ response.answer }}</p>
-                    <p><strong>Feedback:</strong> {{ response.feedback }}</p>
-                </div>
+            
+            <h2>Thank You, {{ candidate_name }}!</h2>
+            <p>Your interview has been completed successfully.</p>
+            <p>Your responses have been recorded and will be reviewed by our team.</p>
+            
+            <div class="action-buttons">
+                <a href="{{ url_for('index') }}" class="btn btn-primary">Return to Home</a>
             </div>
-            {% endfor %}
-        </div>
-
-        <div class="action-buttons">
-            <a href="{{ url_for('index') }}" class="btn btn-primary">Start New Interview</a>
-            <a href="{{ url_for('analyze_resume') }}" class="btn btn-secondary">Analyze Another Resume</a>
         </div>
     </div>
 </div>
+
+<style>
+.thank-you-container {
+    min-height: 80vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.thank-you-card {
+    background: white;
+    border-radius: 20px;
+    padding: 3rem;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+    text-align: center;
+    max-width: 500px;
+    width: 100%;
+}
+
+.thank-you-animation {
+    margin-bottom: 2rem;
+}
+
+.checkmark-circle {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: #4CAF50;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto;
+    animation: checkmark 0.8s ease-in-out;
+}
+
+.checkmark {
+    width: 30px;
+    height: 15px;
+    border: solid white;
+    border-width: 0 0 3px 3px;
+    transform: rotate(-45deg);
+    animation: draw-check 0.5s ease-in-out 0.3s both;
+}
+
+@keyframes checkmark {
+    0% {
+        transform: scale(0);
+        opacity: 0;
+    }
+    50% {
+        transform: scale(1.2);
+        opacity: 0.8;
+    }
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+@keyframes draw-check {
+    0% {
+        width: 0;
+        opacity: 0;
+    }
+    100% {
+        width: 30px;
+        opacity: 1;
+    }
+}
+
+.thank-you-card h2 {
+    color: #333;
+    margin-bottom: 1rem;
+    font-size: 2rem;
+}
+
+.thank-you-card p {
+    color: #7f8c8d;
+    margin-bottom: 0.5rem;
+    font-size: 1.1rem;
+}
+
+.action-buttons {
+    margin-top: 2rem;
+}
+</style>
+
+<script>
+// Clean up any remaining media streams when results page loads
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('🎉 Thank you page loaded - cleaning up any remaining media streams...');
+    
+    // Stop all video streams
+    const videos = document.querySelectorAll('video');
+    videos.forEach(video => {
+        if (video.srcObject) {
+            const stream = video.srcObject;
+            stream.getTracks().forEach(track => {
+                track.stop();
+                console.log('✅ Stopped video track:', track.kind);
+            });
+            video.srcObject = null;
+        }
+    });
+    
+    // Stop any audio contexts from voice recognition
+    if (typeof voiceRecognition !== 'undefined') {
+        if (voiceRecognition.mediaStream) {
+            voiceRecognition.mediaStream.getTracks().forEach(track => {
+                track.stop();
+                console.log('✅ Stopped voice recognition track:', track.kind);
+            });
+            voiceRecognition.mediaStream = null;
+        }
+        
+        if (voiceRecognition.audioContext) {
+            voiceRecognition.audioContext.close().then(() => {
+                console.log('✅ Audio context closed');
+            }).catch(err => {
+                console.error('Error closing audio context:', err);
+            });
+        }
+        
+        // Stop listening if active
+        voiceRecognition.stopListening();
+    }
+    
+    // Stop text-to-speech if available
+    if (typeof textToSpeech !== 'undefined') {
+        textToSpeech.stop();
+    }
+    
+    // Clear permission storage for next interview
+    sessionStorage.removeItem('cameraMicPermissions');
+    
+    console.log('✅ Cleanup complete - all media streams stopped');
+});
+</script>
 {% endblock %}

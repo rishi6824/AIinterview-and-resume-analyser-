@@ -407,7 +407,31 @@ class VoiceRecognition {
     destroy() {
         this.stopListening();
         if (this.audioContext) {
-            this.audioContext.close();
+            this.audioContext.close().then(() => {
+                console.log('✅ Audio context closed in destroy');
+            }).catch(err => {
+                console.error('Error closing audio context:', err);
+            });
+        }
+        
+        // Clean up media stream source
+        if (this.mediaStreamSource) {
+            try {
+                this.mediaStreamSource.disconnect();
+                this.mediaStreamSource = null;
+            } catch (e) {
+                console.error('Error disconnecting media stream source:', e);
+            }
+        }
+        
+        // Clean up analyser
+        if (this.analyser) {
+            try {
+                this.analyser.disconnect();
+                this.analyser = null;
+            } catch (e) {
+                console.error('Error disconnecting analyser:', e);
+            }
         }
     }
 }

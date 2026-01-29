@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Rishi Interview Assistant{% endblock %}</title>
+    <title>{% block title %}Interview Platform{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=2.1">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -44,35 +44,16 @@
         }
     </style>
 </head>
-<body>
-    <!-- DEPRECATED: This base template is deprecated. Use base_interview.html or base_resume.html instead -->
-    <!-- Navbar removed - platforms are now separate -->
+<body class="{% block body_class %}{% endblock %}">
     <main class="main-content">
         {% block content %}{% endblock %}
     </main>
 
     <footer class="footer">
         <div class="footer-content">
-            <p>&copy; 2024 Rishi Interview Assistant. All rights reserved.</p>
-            <div class="admin-link">
-                <a href="{{ url_for('admin') }}">Admin Panel</a>
-            </div>
+            <p>&copy; 2024 Interview Platform. All rights reserved.</p>
         </div>
     </footer>
-
-    <style>
-    .admin-link {
-        margin-top: 0.5rem;
-    }
-    .admin-link a {
-        color: #667eea;
-        text-decoration: none;
-        font-weight: 500;
-    }
-    .admin-link a:hover {
-        text-decoration: underline;
-    }
-    </style>
 
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
 </body>

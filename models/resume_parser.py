@@ -1,4 +1,8 @@
-import PyPDF2
+try:
+    import PyPDF2
+    PDF_SUPPORT = True
+except ImportError:
+    PDF_SUPPORT = False
 from docx import Document
 import re
 
@@ -25,6 +29,9 @@ class ResumeParser:
             raise ValueError("Unsupported file format")
     
     def _parse_pdf(self, file):
+        if not PDF_SUPPORT:
+            return "PDF parsing not available - PyPDF2 not installed"
+
         pdf_reader = PyPDF2.PdfReader(file)
         text = ""
         for page in pdf_reader.pages:

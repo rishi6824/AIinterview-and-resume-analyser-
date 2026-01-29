@@ -1,15 +1,18 @@
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from config import Config
 from models.ai_interviewer import AIInterviewer
 from models.resume_analyzer import ResumeAnalyzer
 from models.speech_processor import SpeechProcessor
 from models.question_generator import QuestionGenerator
+from models.physical_analyzer import PhysicalAnalyzer
+from models.interview_db import InterviewDatabase
 from utils.helpers import allowed_file, calculate_score, clean_text
 import secrets
 import ssl
+import random
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -17,11 +20,13 @@ app.config.from_object(Config)
 # Create upload directory
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# Initialize AI components
+# Initialize AI components and database
 ai_interviewer = AIInterviewer()
 resume_analyzer = ResumeAnalyzer()
 speech_processor = SpeechProcessor()
 question_generator = QuestionGenerator()
+physical_analyzer = PhysicalAnalyzer()
+interview_db = InterviewDatabase()
 
 # Add CORS headers for microphone access
 @app.after_request
@@ -35,7 +40,70 @@ def after_request(response):
 def index():
     return render_template('index.html')
 
-@app.route('/debug/models')
+@app.route('/interview_setup')
+def interview_setup():
+    return render_template('interview_setup.html')
+
+@app.route('/start_interview_with_name', methods=['GET', 'POST'])
+def start_interview_with_name():
+    # Handle both POST (from form) and GET (fallback) requests
+    if request.method == 'POST':
+        candidate_name = request.form.get('candidate_name', '').strip()
+    else:  # GET request
+        candidate_name = request.args.get('candidate_name', '').strip()
+
+    print(f"DEBUG: Method={request.method}, Received candidate_name: '{candidate_name}'")
+    print(f"DEBUG: Form data: {dict(request.form)}")
+    print(f"DEBUG: Args data: {dict(request.args)}")
+
+    if not candidate_name:
+        print("DEBUG: Candidate name is empty, returning 400")
+        return jsonify({'error': 'Candidate name is required'}), 400
+
+    # Clear any existing session
+    session.clear()
+
+    # Store candidate name
+    session['candidate_name'] = candidate_name
+    session['job_role'] = 'software_engineer'
+
+    # Create database entry for this interview
+    interview_id = interview_db.create_interview(candidate_name, 'software_engineer')
+    session['interview_id'] = interview_id
+
+    print(f"✅ Interview session initialized for {candidate_name} (ID: {interview_id})")
+
+    # Initialize interview session
+    session['current_question'] = 0
+    session['score'] = 0
+    session['responses'] = []
+    session['start_time'] = datetime.now().isoformat()
+    session['enable_voice'] = True
+
+    # Generate questions
+    from config import Config
+    target_total = max(Config.MIN_QUESTIONS, min(Config.MAX_QUESTIONS, Config.DEFAULT_QUESTIONS))
+    session['total_questions_target'] = target_total
+
+    resume_analysis = session.get('resume_analysis', {})
+    questions = question_generator.generate_questions_raw('software_engineer', resume_analysis, target_total)
+
+    if not questions:
+        questions = [{
+            "question": "Tell me about yourself and your most relevant experience for this role.",
+            "type": "behavioral",
+            "difficulty": "easy"
+        }]
+
+    session['questions'] = questions
+    print(f"✅ Generated {len(questions)} questions successfully")
+
+    # Return JSON response for frontend to handle redirect
+    print(f"✅ Interview session initialized for {candidate_name}")
+    return jsonify({
+        'success': True,
+        'redirect': url_for('interview_room')
+    })
 def debug_models():
     """Test if all models are working"""
     results = {}
@@ -121,9 +189,9 @@ def auto_next_question():
         return redirect(url_for('index'))
     
     current_q = session['current_question']
-    questions = session['questions']
+    target_total = session.get('total_questions_target', len(session.get('questions', [])))
     
-    if current_q >= len(questions):
+    if current_q >= target_total:
         return redirect(url_for('results'))
     else:
         return redirect(url_for('interview_room'))
@@ -187,56 +255,154 @@ def test_questions():
 def start_video_interview():
     session.clear()
     
-    # Get job role and use resume analysis if available
+    # Get candidate name, job role and use resume analysis if available
+    candidate_name = request.form.get('candidate_name', 'Anonymous')
     job_role = request.form.get('job_role', 'software_engineer')
     resume_analysis = session.get('resume_analysis', {})
     
-    # Generate personalized questions based on resume
-    questions = question_generator.generate_questions(job_role, resume_analysis)
-    
-    # Initialize interview session
+    # Initialize interview session first
     session['interview_id'] = secrets.token_hex(16)
+    session['candidate_name'] = candidate_name  # Store candidate name
     session['current_question'] = 0
     session['score'] = 0
     session['responses'] = []
-    session['questions'] = questions
     session['job_role'] = job_role
     session['start_time'] = datetime.now().isoformat()
     session['enable_voice'] = True
     
-    return redirect(url_for('video_interview'))
+    # Generate OTP for interview verification (6-digit code)
+    otp_code = ''.join([str(random.randint(0, 9)) for _ in range(6)])
+    session['interview_otp'] = otp_code
+    session['otp_expires'] = (datetime.now() + timedelta(minutes=10)).isoformat()  # OTP valid for 10 minutes
+    session['otp_verified'] = False
+    
+    # Interview length target (10-15 by config)
+    from config import Config
+    target_total = max(Config.MIN_QUESTIONS, min(Config.MAX_QUESTIONS, Config.DEFAULT_QUESTIONS))
+    session['total_questions_target'] = target_total
+
+    # Generate only the first question now; generate subsequent questions sequentially (interviewer-style)
+    print(f"🔄 Generating first question for {job_role} interview using Hugging Face API...")
+    first_batch = question_generator.generate_questions_raw(job_role, resume_analysis, 1)
+    first_question = first_batch[0] if first_batch else {
+        "question": "Tell me about yourself and your most relevant experience for this role.",
+        "type": "behavioral",
+        "difficulty": "easy"
+    }
+
+    session['questions'] = [first_question]
+    print(f"✅ Interview initialized with 1/{target_total} questions (sequential generation enabled)")
+    print(f"🔐 OTP generated: {otp_code} (valid for 10 minutes)")
+    
+    return redirect(url_for('interview_room'))
 
 @app.route('/video_interview')
 def video_interview():
     if 'interview_id' not in session:
         return redirect(url_for('index'))
     
+    # Ensure at least the first question exists
+    if 'questions' not in session or not session['questions']:
+        print("⚠️ No questions in session - generating first question...")
+        job_role = session.get('job_role', 'software_engineer')
+        resume_analysis = session.get('resume_analysis', {})
+        from config import Config
+        session['total_questions_target'] = max(Config.MIN_QUESTIONS, min(Config.MAX_QUESTIONS, Config.DEFAULT_QUESTIONS))
+        first_batch = question_generator.generate_questions_raw(job_role, resume_analysis, 1)
+        session['questions'] = first_batch if first_batch else [{
+            "question": "Tell me about yourself and your most relevant experience for this role.",
+            "type": "behavioral",
+            "difficulty": "easy"
+        }]
+        session['current_question'] = 0
+    
     return render_template('video_interview.html',
                          enable_voice=session.get('enable_voice', True))
 
 @app.route('/interview_room')
 def interview_room():
+    print(f"DEBUG: interview_room called, session keys: {list(session.keys())}")
+    print(f"DEBUG: interview_id in session: {'interview_id' in session}")
+    if 'interview_id' in session:
+        print(f"DEBUG: interview_id value: {session.get('interview_id')}")
+    
     if 'interview_id' not in session:
+        print("DEBUG: No interview_id in session, redirecting to index")
         return redirect(url_for('index'))
+    
+    print("DEBUG: interview_id found, proceeding with interview setup")
+    
+    # Ensure interview target is set and at least the first question exists
+    from config import Config
+    if 'total_questions_target' not in session:
+        session['total_questions_target'] = max(Config.MIN_QUESTIONS, min(Config.MAX_QUESTIONS, Config.DEFAULT_QUESTIONS))
+        print(f"DEBUG: Set total_questions_target to {session['total_questions_target']}")
+
+    if 'questions' not in session or not session['questions']:
+        print("DEBUG: No questions found in session - generating first question...")
+        job_role = session.get('job_role', 'software_engineer')
+        resume_analysis = session.get('resume_analysis', {})
+        first_batch = question_generator.generate_questions_raw(job_role, resume_analysis, 1)
+        session['questions'] = first_batch if first_batch else [{
+            "question": "Tell me about yourself and your most relevant experience for this role.",
+            "type": "behavioral",
+            "difficulty": "easy"
+        }]
+        session['current_question'] = 0
+        print(f"DEBUG: Generated questions: {len(session['questions'])}")
     
     current_q = session['current_question']
     questions = session['questions']
+    target_total = session.get('total_questions_target', len(questions))
     
-    # Check if interview is completed
-    if current_q >= len(questions):
+    print(f"DEBUG: current_q={current_q}, len(questions)={len(questions)}, target_total={target_total}")
+    
+    # Check if interview is completed - auto redirect to results
+    if current_q >= target_total:
+        print("DEBUG: Interview completed, redirecting to results")
+        # Stop any ongoing analysis and redirect to results
         return redirect(url_for('results'))
+
+    # Ensure the current question exists (sequential generation)
+    if current_q >= len(questions):
+        print(f"DEBUG: Need to generate question {current_q}, generating...")
+        job_role = session.get('job_role', 'software_engineer')
+        resume_analysis = session.get('resume_analysis', {})
+        prev_answer = None
+        if session.get('responses'):
+            prev_answer = session['responses'][-1].get('answer')
+        next_q = question_generator.generate_next_question(job_role, resume_analysis, questions, prev_answer)
+        questions.append(next_q)
+        session['questions'] = questions
+        print(f"DEBUG: Generated next question: {next_q}")
     
     question = questions[current_q]
-    return render_template('interview_room.html',
+    print(f"DEBUG: Current question: {question}")
+    
+    try:
+        result = render_template('interview_room.html',
                          question=question,
                          question_num=current_q + 1,
-                         total_questions=len(questions),
+                         total_questions=target_total,
                          enable_voice=session.get('enable_voice', True))
+        print("DEBUG: Template rendered successfully")
+        return result
+    except Exception as e:
+        print(f"DEBUG: Template rendering error: {e}")
+        import traceback
+        traceback.print_exc()
+        return f"Template error: {e}", 500
     
     
 @app.route('/submit_answer', methods=['POST'])
 def submit_answer():
+    print(f"DEBUG: submit_answer called, session keys: {list(session.keys())}")
+    print(f"DEBUG: interview_id in session: {'interview_id' in session}")
+    if 'interview_id' in session:
+        print(f"DEBUG: interview_id value: {session.get('interview_id')}")
+    
     if 'interview_id' not in session:
+        print("DEBUG: No interview_id in session, returning 400")
         return jsonify({'error': 'No active interview'}), 400
     
     current_q = session['current_question']
@@ -256,10 +422,26 @@ def submit_answer():
     job_role = session['job_role']
     resume_analysis = session.get('resume_analysis', {})
     
+    # Get physical analysis data if available
+    physical_data = session.get('physical_analysis', {}).get(f'question_{current_q}', {})
+    
     # Analyze the answer
     score, feedback, detailed_analysis = ai_interviewer.analyze_answer(
         job_role, current_q, answer, resume_analysis
     )
+    
+    # Integrate physical analysis into score if available
+    if physical_data and Config.ENABLE_PHYSICAL_ANALYSIS:
+        physical_score = physical_data.get('overall_physical_score', 0)
+        # Combine answer score (70%) with physical score (30%)
+        combined_score = (score * 0.7) + (physical_score * 0.3)
+        score = round(combined_score, 1)
+        
+        # Add physical analysis to detailed analysis
+        detailed_analysis['physical_analysis'] = physical_data
+        detailed_analysis['confidence_score'] = physical_data.get('confidence', 0)
+        detailed_analysis['voice_quality'] = physical_data.get('voice_quality', 0)
+        detailed_analysis['body_language'] = physical_data.get('body_language', 0)
     
     # Add AI personality to feedback
     if score >= 8:
@@ -271,21 +453,56 @@ def submit_answer():
     else:
         ai_feedback = f"I see. {feedback} We'll practice more on this area."
     
-    # Store response
-    session['responses'].append({
+    # Store response with physical analysis
+    response_data = {
         'question_index': current_q,
         'question': questions[current_q]['question'],
         'answer': answer,
         'score': score,
         'feedback': ai_feedback,
         'detailed_analysis': detailed_analysis
-    })
+    }
+    
+    # Add physical analysis if available
+    if physical_data:
+        response_data['physical_analysis'] = physical_data
+    
+    session['responses'].append(response_data)
+    
+    # Save responses to database
+    interview_id = session.get('interview_id')
+    if interview_id:
+        interview_db.save_responses(interview_id, session['responses'])
+    
+    # Clear physical analysis for next question
+    if f'question_{current_q}' in session.get('physical_analysis', {}):
+        session['physical_analysis'].pop(f'question_{current_q}', None)
     
     session['score'] += score
     session['current_question'] += 1
     
     # Check if interview is completed
-    completed = session['current_question'] >= len(questions)
+    target_total = session.get('total_questions_target', len(questions))
+    completed = session['current_question'] >= target_total
+
+    # If completed, save final results to database
+    if completed and interview_id:
+        avg_score = session['score'] / len(session['responses']) if session['responses'] else 0
+        interview_db.update_interview_score(interview_id, round(avg_score, 1),
+                                          len(session['responses']), target_total)
+
+    # Pre-generate the next question (so the next page load has it)
+    if not completed:
+        next_index = session['current_question']
+        if next_index >= len(session.get('questions', [])):
+            job_role = session['job_role']
+            next_q = question_generator.generate_next_question(
+                job_role,
+                resume_analysis,
+                session.get('questions', []),
+                last_answer=answer
+            )
+            session['questions'].append(next_q)
     
     return jsonify({
         'next_question': session['current_question'],
@@ -295,8 +512,50 @@ def submit_answer():
         'completed': completed
     })
 
-@app.route('/process_voice', methods=['POST'])
-def process_voice():
+@app.route('/admin')
+def admin():
+    """Admin panel to view all interviews"""
+    interviews = interview_db.get_all_interviews()
+    stats = interview_db.get_interview_stats()
+    score_distribution = interview_db.get_score_distribution()
+    job_role_stats = interview_db.get_job_role_stats()
+    return render_template('admin.html',
+                         interviews=interviews,
+                         stats=stats,
+                         score_distribution=score_distribution,
+                         job_role_stats=job_role_stats)
+
+@app.route('/admin/interview/<int:interview_id>')
+def admin_interview_detail(interview_id):
+    """View detailed interview results"""
+    interview = interview_db.get_interview(interview_id)
+    if not interview:
+        return "Interview not found", 404
+
+    # Parse JSON data - handle None values
+    responses_data = interview.get('responses') or '[]'
+    resume_analysis_data = interview.get('resume_analysis') or '{}'
+
+    try:
+        responses = json.loads(responses_data)
+    except (json.JSONDecodeError, TypeError):
+        responses = []
+
+    try:
+        resume_analysis = json.loads(resume_analysis_data)
+    except (json.JSONDecodeError, TypeError):
+        resume_analysis = {}
+
+    return render_template('admin_interview_detail.html',
+                         interview=interview,
+                         responses=responses,
+                         resume_analysis=resume_analysis)
+
+@app.route('/admin/delete/<int:interview_id>', methods=['POST'])
+def admin_delete_interview(interview_id):
+    """Delete an interview"""
+    interview_db.delete_interview(interview_id)
+    return redirect(url_for('admin'))
     if 'interview_id' not in session:
         return jsonify({'error': 'No active interview'}), 400
     
@@ -326,6 +585,141 @@ def process_voice():
             'error': str(e)
         })
 
+@app.route('/analyze_physical', methods=['POST'])
+def analyze_physical():
+    """Analyze physical actions: confidence, voice, body language"""
+    if 'interview_id' not in session:
+        return jsonify({'error': 'No active interview'}), 400
+    
+    try:
+        current_q = session['current_question']
+        
+        # Get video frames and audio segments from request
+        video_frames = request.form.getlist('video_frames[]')  # Base64 encoded frames
+        audio_segments = request.form.getlist('audio_segments[]')  # Base64 encoded audio
+        
+        if not video_frames and not audio_segments:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        # Analyze physical actions using Hugging Face
+        physical_analysis = physical_analyzer.analyze_realtime_data(
+            video_frames if video_frames else [],
+            audio_segments if audio_segments else []
+        )
+        
+        # Store analysis in session for this question
+        if 'physical_analysis' not in session:
+            session['physical_analysis'] = {}
+        
+        session['physical_analysis'][f'question_{current_q}'] = physical_analysis
+        
+        return jsonify({
+            'success': True,
+            'analysis': physical_analysis,
+            'summary': physical_analyzer.get_analysis_summary()
+        })
+        
+    except Exception as e:
+        print(f"Error in physical analysis: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/update_physical_analysis', methods=['POST'])
+def update_physical_analysis():
+    """Update physical analysis with single frame/audio segment"""
+    if 'interview_id' not in session:
+        return jsonify({'error': 'No active interview'}), 400
+    
+    try:
+        current_q = session['current_question']
+        
+        # Get single frame or audio segment
+        video_frame = request.form.get('video_frame')  # Base64 encoded
+        audio_segment = request.form.get('audio_segment')  # Base64 encoded
+        
+        if not video_frame and not audio_segment:
+            return jsonify({'success': False, 'error': 'No data provided'})
+        
+        # Initialize storage if needed
+        if 'physical_analysis' not in session:
+            session['physical_analysis'] = {}
+        
+        if f'question_{current_q}' not in session['physical_analysis']:
+            session['physical_analysis'][f'question_{current_q}'] = {
+                'confidence': 0.0,
+                'voice_quality': 0.0,
+                'body_language': 0.0,
+                'overall_physical_score': 0.0,
+                'details': {
+                    'confidence_scores': [],
+                    'voice_scores': [],
+                    'posture_scores': [],
+                    'frame_count': 0,
+                    'audio_segment_count': 0
+                }
+            }
+        
+        current_data = session['physical_analysis'][f'question_{current_q}']
+        details = current_data['details']
+        
+        # Analyze video frame if provided
+        if video_frame:
+            frame_analysis = physical_analyzer.analyze_video_frame(video_frame)
+            if frame_analysis:
+                details['confidence_scores'].append(frame_analysis.get('confidence', 5.0))
+                details['posture_scores'].append(frame_analysis.get('posture_score', 5.0))
+                details['frame_count'] += 1
+                
+                # Recalculate averages
+                if details['confidence_scores']:
+                    current_data['confidence'] = round(
+                        sum(details['confidence_scores']) / len(details['confidence_scores']), 2
+                    )
+                if details['posture_scores']:
+                    current_data['body_language'] = round(
+                        sum(details['posture_scores']) / len(details['posture_scores']), 2
+                    )
+        
+        # Analyze audio segment if provided
+        if audio_segment:
+            audio_analysis = physical_analyzer.analyze_audio(audio_segment)
+            if audio_analysis:
+                details['voice_scores'].append(audio_analysis.get('voice_score', 5.0))
+                details['audio_segment_count'] += 1
+                
+                # Recalculate average
+                if details['voice_scores']:
+                    current_data['voice_quality'] = round(
+                        sum(details['voice_scores']) / len(details['voice_scores']), 2
+                    )
+        
+        # Recalculate overall physical score
+        current_data['overall_physical_score'] = round(
+            (current_data['confidence'] * Config.CONFIDENCE_WEIGHT +
+             current_data['voice_quality'] * Config.VOICE_WEIGHT +
+             current_data['body_language'] * Config.BODY_LANGUAGE_WEIGHT), 2
+        )
+        
+        return jsonify({
+            'success': True,
+            'current_analysis': current_data,
+            'summary': {
+                'confidence': current_data['confidence'],
+                'voice_quality': current_data['voice_quality'],
+                'body_language': current_data['body_language'],
+                'overall_physical_score': current_data['overall_physical_score']
+            }
+        })
+        
+    except Exception as e:
+        print(f"Error updating physical analysis: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @app.route('/results')
 def results():
     if 'interview_id' not in session:
@@ -334,18 +728,73 @@ def results():
     total_score = session['score']
     max_possible = len(session['responses']) * 10
     percentage = (total_score / max_possible * 100) if max_possible > 0 else 0
+    candidate_name = session.get('candidate_name', 'Anonymous')
     
     # Generate overall feedback
     overall_feedback = ai_interviewer.generate_overall_feedback(
         session['responses'], session.get('resume_analysis', {})
     )
     
+    # Store prediction scores with candidate name
+    prediction_data = {
+        'candidate_name': candidate_name,
+        'otp': session.get('interview_otp', 'N/A'),
+        'interview_id': session['interview_id'],
+        'job_role': session.get('job_role', 'software_engineer'),
+        'total_score': total_score,
+        'percentage': percentage,
+        'max_possible': max_possible,
+        'total_questions': len(session['responses']),
+        'responses': session['responses'],
+        'overall_feedback': overall_feedback,
+        'start_time': session.get('start_time'),
+        'end_time': datetime.now().isoformat(),
+        'physical_analysis': session.get('physical_analysis', {})
+    }
+    
+    # Save prediction scores to file (JSON format)
+    try:
+        os.makedirs('data/predictions', exist_ok=True)
+        prediction_file = f"data/predictions/{session['interview_id']}_{candidate_name.replace(' ', '_')}.json"
+        with open(prediction_file, 'w') as f:
+            json.dump(prediction_data, f, indent=2)
+        print(f"✅ Prediction scores saved for {candidate_name}: {prediction_file}")
+    except Exception as e:
+        print(f"⚠️ Error saving prediction scores: {e}")
+    
     return render_template('results.html',
+                         candidate_name=candidate_name,
                          score=total_score,
                          percentage=percentage,
                          responses=session['responses'],
                          overall_feedback=overall_feedback,
                          resume_analysis=session.get('resume_analysis'))
+
+@app.route('/admin')
+def admin_panel():
+    """Admin panel to view all interview predictions"""
+    try:
+        predictions_dir = 'data/predictions'
+        if not os.path.exists(predictions_dir):
+            return render_template('admin.html', predictions=[])
+        
+        predictions = []
+        for filename in os.listdir(predictions_dir):
+            if filename.endswith('.json'):
+                try:
+                    with open(os.path.join(predictions_dir, filename), 'r') as f:
+                        data = json.load(f)
+                        predictions.append(data)
+                except Exception as e:
+                    print(f"Error loading prediction file {filename}: {e}")
+        
+        # Sort by end time (most recent first)
+        predictions.sort(key=lambda x: x.get('end_time', ''), reverse=True)
+        
+        return render_template('admin.html', predictions=predictions)
+    except Exception as e:
+        print(f"Error loading admin panel: {e}")
+        return render_template('admin.html', predictions=[])
 
 @app.route('/get_next_question')
 def get_next_question():
@@ -354,15 +803,26 @@ def get_next_question():
     
     current_q = session['current_question']
     questions = session['questions']
+    target_total = session.get('total_questions_target', len(questions))
     
-    if current_q >= len(questions):
+    if current_q >= target_total:
         return jsonify({'completed': True})
     
+    # Ensure question exists
+    if current_q >= len(questions):
+        job_role = session.get('job_role', 'software_engineer')
+        resume_analysis = session.get('resume_analysis', {})
+        prev_answer = None
+        if session.get('responses'):
+            prev_answer = session['responses'][-1].get('answer')
+        questions.append(question_generator.generate_next_question(job_role, resume_analysis, questions, prev_answer))
+        session['questions'] = questions
+
     question = questions[current_q]
     return jsonify({
         'question': question['question'],
         'question_num': current_q + 1,
-        'total_questions': len(questions),
+        'total_questions': target_total,
         'type': question.get('type', 'technical')
     })
 

@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "base_interview.html" %}
 
 {% block title %}Interview Session{% endblock %}
 
@@ -13,7 +13,7 @@
         </div>
 
         <div class="question-card">
-            <h3>{{ question.question }}</h3>
+            <h3>{{ question.question|e }}</h3>
             <p class="question-type">{{ question.type|title }} Question</p>
         </div>
 

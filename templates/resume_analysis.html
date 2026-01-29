@@ -1,11 +1,14 @@
-{% extends "base.html" %}
+{% extends "base_resume.html" %}
 
-{% block title %}Resume Analysis{% endblock %}
+{% block title %}Resume Analyzer Platform{% endblock %}
 
 {% block content %}
 <div class="resume-analysis">
     <div class="container">
-        <h2>Resume Analysis</h2>
+        <h2>Resume Analyzer Platform</h2>
+        <p style="text-align: center; color: #7f8c8d; margin-bottom: 2rem;">
+            Upload your resume to get AI-powered analysis and recommendations
+        </p>
         
         <div class="upload-section">
             <form action="{{ url_for('analyze_resume') }}" method="POST" enctype="multipart/form-data">
@@ -101,17 +104,6 @@
                     <li>{{ recommendation }}</li>
                     {% endfor %}
                 </ul>
-            </div>
-
-            <!-- Start Interview Button -->
-            <div class="action-section">
-                <form action="{{ url_for('start_video_interview') }}" method="POST">
-                    <input type="hidden" name="job_role" value="software_engineer">
-                    <input type="hidden" name="enable_voice" value="true">
-                    <button type="submit" class="btn btn-primary btn-large">
-                        Start Video Interview with AI
-                    </button>
-                </form>
             </div>
         </div>
         {% endif %}
