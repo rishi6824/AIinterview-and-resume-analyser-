@@ -12,7 +12,7 @@
     --success-gradient: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
     --warning-gradient: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
     --dark-gradient: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
-    
+
     /* Solid Colors */
     --primary: #667eea;
     --primary-dark: #5568d3;
@@ -24,13 +24,13 @@
     --dark: #2c3e50;
     --light: #ecf0f1;
     --white: #ffffff;
-    
+
     /* Shadows */
     --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.08);
     --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.12);
     --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.16);
     --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.24);
-    
+
     /* Transitions */
     --transition-fast: 0.2s ease;
     --transition-base: 0.3s ease;
@@ -76,12 +76,12 @@ body.interview-mode .main-content {
 
 body.interview-mode .interview-room {
     padding: 0;
-    height: 100vh;
-    display: flex;
-    align-items: stretch;
+    min-height: 100vh;
+    display: block;
+    /* Use block for better stacking of dashboard elements */
 }
 
-body.interview-mode .interview-room > .container {
+body.interview-mode .interview-room>.container {
     max-width: none;
     width: 100%;
     padding: 16px;
@@ -89,7 +89,7 @@ body.interview-mode .interview-room > .container {
     overflow: auto;
 }
 
-/* Hide timers / progress / “process” UI in fullscreen interview */
+/* Relaxed visibility for interview mode to allow dynamic UI components */
 body.interview-mode .interview-header,
 body.interview-mode .progress-info,
 body.interview-mode .timer-container,
@@ -97,14 +97,20 @@ body.interview-mode .timer-section,
 body.interview-mode .timer,
 body.interview-mode .time-info,
 body.interview-mode .status-indicator,
-body.interview-mode .auto-next-countdown,
-body.interview-mode .feedback-section {
-    display: none !important;
+body.interview-mode .auto-next-countdown {
+    display: initial;
+    /* Allow these to show when needed */
 }
 
-/* Show answer section prominently in interview mode */
+body.interview-mode .feedback-section {
+    display: none;
+    /* Keep hidden until completed */
+}
+
+/* Show answer section prominently in interview mode - removed !important to allow JS control */
 body.interview-mode .answer-section {
-    display: block !important;
+    display: none;
+    /* Hide by default, JS will show it */
     margin-top: 2rem;
 }
 
@@ -132,7 +138,7 @@ body::before {
     left: 0;
     width: 100%;
     height: 100%;
-    background-image: 
+    background-image:
         radial-gradient(circle at 20% 50%, rgba(102, 126, 234, 0.1) 0%, transparent 50%),
         radial-gradient(circle at 80% 80%, rgba(118, 75, 162, 0.1) 0%, transparent 50%),
         radial-gradient(circle at 40% 20%, rgba(245, 87, 108, 0.1) 0%, transparent 50%);
@@ -141,8 +147,13 @@ body::before {
 }
 
 @keyframes backgroundMove {
-    0% { transform: translateY(0) scale(1); }
-    100% { transform: translateY(-50px) scale(1.1); }
+    0% {
+        transform: translateY(0) scale(1);
+    }
+
+    100% {
+        transform: translateY(-50px) scale(1.1);
+    }
 }
 
 .container {
@@ -174,6 +185,7 @@ body::before {
         transform: translateY(-100%);
         opacity: 0;
     }
+
     to {
         transform: translateY(0);
         opacity: 1;
@@ -205,8 +217,13 @@ body::before {
 }
 
 @keyframes glow {
-    from { filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.5)); }
-    to { filter: drop-shadow(0 0 15px rgba(255, 255, 255, 0.8)); }
+    from {
+        filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.5));
+    }
+
+    to {
+        filter: drop-shadow(0 0 15px rgba(255, 255, 255, 0.8));
+    }
 }
 
 .nav-menu {
@@ -365,10 +382,13 @@ body::before {
 }
 
 @keyframes pulse-glow {
-    0%, 100% {
+
+    0%,
+    100% {
         transform: scale(1);
         box-shadow: 0 0 20px rgba(39, 174, 96, 0.6);
     }
+
     50% {
         transform: scale(1.05);
         box-shadow: 0 0 30px rgba(39, 174, 96, 0.9);
@@ -390,6 +410,7 @@ body::before {
         opacity: 0;
         transform: translateY(30px);
     }
+
     to {
         opacity: 1;
         transform: translateY(0);
@@ -409,8 +430,15 @@ body::before {
 }
 
 @keyframes gradient-shift {
-    0%, 100% { background-position: 0% 50%; }
-    50% { background-position: 100% 50%; }
+
+    0%,
+    100% {
+        background-position: 0% 50%;
+    }
+
+    50% {
+        background-position: 100% 50%;
+    }
 }
 
 .hero-section p {
@@ -439,6 +467,7 @@ body::before {
         opacity: 0;
         transform: scale(0.9);
     }
+
     to {
         opacity: 1;
         transform: scale(1);
@@ -519,9 +548,17 @@ body::before {
     animation-fill-mode: both;
 }
 
-.feature-card:nth-child(1) { animation-delay: 0.1s; }
-.feature-card:nth-child(2) { animation-delay: 0.2s; }
-.feature-card:nth-child(3) { animation-delay: 0.3s; }
+.feature-card:nth-child(1) {
+    animation-delay: 0.1s;
+}
+
+.feature-card:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.feature-card:nth-child(3) {
+    animation-delay: 0.3s;
+}
 
 .feature-card::before {
     content: '';
@@ -602,8 +639,15 @@ body::before {
 }
 
 @keyframes pulse {
-    0%, 100% { transform: scale(1); }
-    50% { transform: scale(1.05); }
+
+    0%,
+    100% {
+        transform: scale(1);
+    }
+
+    50% {
+        transform: scale(1.05);
+    }
 }
 
 .timer-container {
@@ -702,8 +746,15 @@ body::before {
 }
 
 @keyframes borderPulse {
-    0%, 100% { border-color: var(--primary); }
-    50% { border-color: var(--secondary); }
+
+    0%,
+    100% {
+        border-color: var(--primary);
+    }
+
+    50% {
+        border-color: var(--secondary);
+    }
 }
 
 .placeholder-content {
@@ -717,8 +768,15 @@ body::before {
 }
 
 @keyframes bounce {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-20px); }
+
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+
+    50% {
+        transform: translateY(-20px);
+    }
 }
 
 /* ========================================
@@ -757,8 +815,13 @@ body::before {
 }
 
 @keyframes robotHeadGlow {
-    0% { box-shadow: 0 0 20px rgba(231, 76, 60, 0.3); }
-    100% { box-shadow: 0 0 30px rgba(231, 76, 60, 0.6); }
+    0% {
+        box-shadow: 0 0 20px rgba(231, 76, 60, 0.3);
+    }
+
+    100% {
+        box-shadow: 0 0 30px rgba(231, 76, 60, 0.6);
+    }
 }
 
 .robot-eyes {
@@ -792,15 +855,36 @@ body::before {
 }
 
 @keyframes eyeBlink {
-    0%, 90%, 100% { transform: scaleY(1); }
-    95% { transform: scaleY(0.1); }
+
+    0%,
+    90%,
+    100% {
+        transform: scaleY(1);
+    }
+
+    95% {
+        transform: scaleY(0.1);
+    }
 }
 
 @keyframes pupilMove {
-    0%, 100% { transform: translateX(0); }
-    25% { transform: translateX(3px); }
-    50% { transform: translateX(-3px); }
-    75% { transform: translateX(3px); }
+
+    0%,
+    100% {
+        transform: translateX(0);
+    }
+
+    25% {
+        transform: translateX(3px);
+    }
+
+    50% {
+        transform: translateX(-3px);
+    }
+
+    75% {
+        transform: translateX(3px);
+    }
 }
 
 .robot-mouth {
@@ -814,10 +898,23 @@ body::before {
 }
 
 @keyframes mouthTalk {
-    0%, 100% { height: 15px; }
-    25% { height: 8px; }
-    50% { height: 20px; }
-    75% { height: 8px; }
+
+    0%,
+    100% {
+        height: 15px;
+    }
+
+    25% {
+        height: 8px;
+    }
+
+    50% {
+        height: 20px;
+    }
+
+    75% {
+        height: 8px;
+    }
 }
 
 .robot-body {
@@ -871,8 +968,13 @@ body::before {
 }
 
 @keyframes textGlow {
-    0% { text-shadow: 0 0 10px #00f2fe; }
-    100% { text-shadow: 0 0 20px #00f2fe, 0 0 30px #00f2fe; }
+    0% {
+        text-shadow: 0 0 10px #00f2fe;
+    }
+
+    100% {
+        text-shadow: 0 0 20px #00f2fe, 0 0 30px #00f2fe;
+    }
 }
 
 .screen-pulse {
@@ -885,8 +987,17 @@ body::before {
 }
 
 @keyframes pulse {
-    0%, 100% { opacity: 0.3; transform: scaleX(0.5); }
-    50% { opacity: 1; transform: scaleX(1); }
+
+    0%,
+    100% {
+        opacity: 0.3;
+        transform: scaleX(0.5);
+    }
+
+    50% {
+        opacity: 1;
+        transform: scaleX(1);
+    }
 }
 
 .robot-arms {
@@ -916,9 +1027,19 @@ body::before {
 }
 
 @keyframes armWave {
-    0%, 100% { transform: rotate(0deg); }
-    25% { transform: rotate(10deg); }
-    75% { transform: rotate(-10deg); }
+
+    0%,
+    100% {
+        transform: rotate(0deg);
+    }
+
+    25% {
+        transform: rotate(10deg);
+    }
+
+    75% {
+        transform: rotate(-10deg);
+    }
 }
 
 .robot-base {
@@ -957,8 +1078,15 @@ body::before {
 }
 
 @keyframes legBounce {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-5px); }
+
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+
+    50% {
+        transform: translateY(-5px);
+    }
 }
 
 .robot-glow {
@@ -975,8 +1103,17 @@ body::before {
 }
 
 @keyframes glowPulse {
-    0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.3; }
-    50% { transform: translate(-50%, -50%) scale(1.1); opacity: 0.6; }
+
+    0%,
+    100% {
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 0.3;
+    }
+
+    50% {
+        transform: translate(-50%, -50%) scale(1.1);
+        opacity: 0.6;
+    }
 }
 
 /* Responsive Robot Animation */
@@ -984,58 +1121,58 @@ body::before {
     .robot-animation {
         height: 350px;
     }
-    
+
     .robot-container {
         width: 160px;
         height: 240px;
     }
-    
+
     .robot-head {
         width: 100px;
         height: 80px;
     }
-    
+
     .robot-body {
         width: 120px;
         height: 120px;
     }
-    
+
     .robot-chest {
         width: 80px;
         height: 60px;
         margin: 10px auto;
     }
-    
+
     .robot-screen {
         width: 65px;
         height: 50px;
     }
-    
+
     .screen-text {
         font-size: 10px;
     }
-    
+
     .robot-arms {
         width: 140px;
         top: 30px;
         left: -10px;
     }
-    
+
     .robot-arm {
         width: 16px;
         height: 50px;
     }
-    
+
     .robot-base {
         width: 130px;
         height: 35px;
     }
-    
+
     .robot-leg {
         width: 20px;
         height: 20px;
     }
-    
+
     .robot-glow {
         width: 250px;
         height: 250px;
@@ -1046,22 +1183,22 @@ body::before {
     .robot-animation {
         height: 300px;
     }
-    
+
     .robot-container {
         width: 140px;
         height: 200px;
     }
-    
+
     .robot-head {
         width: 80px;
         height: 65px;
     }
-    
+
     .robot-body {
         width: 100px;
         height: 100px;
     }
-    
+
     .robot-glow {
         width: 200px;
         height: 200px;
@@ -1086,15 +1223,37 @@ body::before {
 }
 
 @keyframes armWaveSpeaking {
-    0%, 100% { transform: rotate(0deg) scale(1); }
-    25% { transform: rotate(15deg) scale(1.05); }
-    50% { transform: rotate(0deg) scale(1.1); }
-    75% { transform: rotate(-15deg) scale(1.05); }
+
+    0%,
+    100% {
+        transform: rotate(0deg) scale(1);
+    }
+
+    25% {
+        transform: rotate(15deg) scale(1.05);
+    }
+
+    50% {
+        transform: rotate(0deg) scale(1.1);
+    }
+
+    75% {
+        transform: rotate(-15deg) scale(1.05);
+    }
 }
 
 @keyframes glowPulseSpeaking {
-    0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.5; }
-    50% { transform: translate(-50%, -50%) scale(1.2); opacity: 0.8; }
+
+    0%,
+    100% {
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 0.5;
+    }
+
+    50% {
+        transform: translate(-50%, -50%) scale(1.2);
+        opacity: 0.8;
+    }
 }
 
 /* ========================================
@@ -1159,6 +1318,7 @@ body::before {
         opacity: 0;
         transform: translateY(30px);
     }
+
     to {
         opacity: 1;
         transform: translateY(0);
@@ -1205,8 +1365,13 @@ body::before {
 }
 
 @keyframes shimmer {
-    0% { left: -100%; }
-    100% { left: 100%; }
+    0% {
+        left: -100%;
+    }
+
+    100% {
+        left: 100%;
+    }
 }
 
 .voice-controls {
@@ -1351,6 +1516,7 @@ body::before {
         transform: scale(0);
         opacity: 0;
     }
+
     to {
         transform: scale(1);
         opacity: 1;
@@ -1368,8 +1534,13 @@ body::before {
 }
 
 @keyframes rotate {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 .response-card {
@@ -1487,8 +1658,17 @@ body::before {
 }
 
 @keyframes status-pulse {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.7; transform: scale(1.2); }
+
+    0%,
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+
+    50% {
+        opacity: 0.7;
+        transform: scale(1.2);
+    }
 }
 
 /* ========================================
@@ -1592,25 +1772,25 @@ body::before {
     .hero-section h1 {
         font-size: 2.5rem;
     }
-    
+
     .interview-content {
         grid-template-columns: 1fr;
     }
-    
+
     .features {
         grid-template-columns: 1fr;
     }
-    
+
     .nav-menu {
         flex-direction: column;
         gap: 1rem;
     }
-    
+
     .timer-container {
         flex-direction: column;
         gap: 1rem;
     }
-    
+
     .cta-section {
         padding: 2rem;
     }
@@ -1620,13 +1800,23 @@ body::before {
    UTILITY ANIMATIONS
    ======================================== */
 @keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
 }
 
 @keyframes fadeOut {
-    from { opacity: 1; }
-    to { opacity: 0; }
+    from {
+        opacity: 1;
+    }
+
+    to {
+        opacity: 0;
+    }
 }
 
 .auto-next-countdown {
@@ -1837,16 +2027,28 @@ body::before {
     animation-fill-mode: both;
 }
 
-.recommendations-section li:nth-child(1) { animation-delay: 0.1s; }
-.recommendations-section li:nth-child(2) { animation-delay: 0.2s; }
-.recommendations-section li:nth-child(3) { animation-delay: 0.3s; }
-.recommendations-section li:nth-child(4) { animation-delay: 0.4s; }
+.recommendations-section li:nth-child(1) {
+    animation-delay: 0.1s;
+}
+
+.recommendations-section li:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.recommendations-section li:nth-child(3) {
+    animation-delay: 0.3s;
+}
+
+.recommendations-section li:nth-child(4) {
+    animation-delay: 0.4s;
+}
 
 @keyframes fadeInLeft {
     from {
         opacity: 0;
         transform: translateX(-30px);
     }
+
     to {
         opacity: 1;
         transform: translateX(0);
@@ -1944,8 +2146,13 @@ input[type="checkbox"] {
 }
 
 @keyframes shimmer-progress {
-    0% { left: -100%; }
-    100% { left: 100%; }
+    0% {
+        left: -100%;
+    }
+
+    100% {
+        left: 100%;
+    }
 }
 
 /* Additional smooth scroll animations */

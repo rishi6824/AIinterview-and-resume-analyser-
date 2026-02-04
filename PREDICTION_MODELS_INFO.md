@@ -453,4 +453,13 @@ Currently, no formal metrics are implemented. Suggestions:
 
 ---
 
-**Last Updated:** December 2025
+## 🔒 Local Question Bank & Management
+
+- The project now includes a local question bank at `data/questions/interview_questions.json` that contains curated questions for multiple engineering branches (software, frontend, backend, devops, data science, QA, embedded, electrical, mechanical, civil, etc.).
+- This file is used as a resilient fallback when external APIs (Router/DeepSeek/Hugging Face) are unavailable or API keys are not set.
+- A simple management script `scripts/manage_questions.py` is provided to list roles and add questions from the command line:
+  - `python3 scripts/manage_questions.py list-roles`
+  - `python3 scripts/manage_questions.py list --role software_engineer`
+  - `python3 scripts/manage_questions.py add --role software_engineer --question "Why X?" --type technical --difficulty medium`
+
+**Last Updated:** December 2025 (updated with local question bank details)

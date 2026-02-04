@@ -179,7 +179,7 @@ class AIInterviewer:
         """Analyze answer using Hugging Face models for sentiment and classification"""
         try:
             headers = {
-                "Authorization": f"Bearer {self.api_key}",
+                "Authorization": f"Bearer {self.hf_api_key}",
                 "Content-Type": "application/json"
             }
             
@@ -482,7 +482,7 @@ Score the answer based on:
             all_answers = " ".join([r.get('answer', '') for r in responses[:5]])
             
             headers = {
-                "Authorization": f"Bearer {self.api_key}",
+                "Authorization": f"Bearer {self.hf_api_key}",
                 "Content-Type": "application/json"
             }
             

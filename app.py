@@ -36,9 +36,178 @@ def after_request(response):
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     return response
 
+# Debug small probe logger for .well-known requests (quiet unless matched)
+@app.before_request
+def log_well_known_requests():
+    try:
+        if '.well-known' in request.path:
+            print(f"DEBUG: Well-known probe request: {request.method} {request.path}")
+    except Exception:
+        pass
+
 @app.route('/')
 def index():
     return render_template('index.html')
+
+# Serve devtools probe file to avoid 404 spam
+@app.route('/.well-known/appspecific/com.chrome.devtools.json')
+def serve_chrome_devtools_probe_root():
+    try:
+        file_path = os.path.join(app.root_path, '.well-known', 'appspecific', 'com.chrome.devtools.json')
+        print(f"DEBUG: serve_chrome_devtools_probe_root called, checking {file_path}")
+        if os.path.exists(file_path):
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            return (content, 200, {'Content-Type': 'application/json'})
+        return ('{}', 200, {'Content-Type': 'application/json'})
+    except Exception as e:
+        print(f"Error serving devtools probe (root): {e}")
+        return ('', 204)
+
+# Generic catch for other .well-known/appspecific probes (return 204 No Content)
+@app.route('/.well-known/appspecific/<path:filename>', methods=['GET','HEAD','OPTIONS'])
+def appspecific_probe_root(filename):
+    print(f"DEBUG: appspecific probe for {filename}")
+    return ('', 204)
+
+# Catch-all for any /.well-known/* probe to avoid 404 spam from browsers or extensions
+@app.route('/.well-known/<path:subpath>', methods=['GET','HEAD','OPTIONS'])
+def well_known_catch_all(subpath):
+    print(f"DEBUG: Well-known catch-all probe: {request.method} {request.path}")
+    # Try to serve matching file if exists under .well-known
+    file_path = os.path.join(app.root_path, '.well-known', subpath)
+    try:
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            return (content, 200, {'Content-Type': 'application/json'})
+    except Exception as e:
+        print(f"Error serving well-known {subpath}: {e}")
+    # Otherwise return empty JSON to silence clients
+    return ('{}', 200, {'Content-Type': 'application/json'})
+
+# Helpful 404 logger to capture missing resource patterns (quiet)
+@app.errorhandler(404)
+def log_404(e):
+    try:
+        print(f"DEBUG 404: {request.method} {request.path} Host: {request.host} Referer: {request.headers.get('Referer')}")
+    except Exception:
+        pass
+    return e, 404
+
+# JSON endpoints for question bank
+@app.route('/api/questions/<role>')
+def api_get_questions_root(role):
+    try:
+        role_q = question_generator.base_questions.get(role)
+        if not role_q:
+            return jsonify({'error': 'Role not found', 'available_roles': list(question_generator.base_questions.keys())}), 404
+        return jsonify({'role': role, 'questions': role_q, 'count': len(role_q)})
+    except Exception as e:
+        print(f"Error in api_get_questions_root: {e}")
+        return jsonify({'error': 'internal error'}), 500
+
+@app.route('/data/questions/<role>.json')
+def data_role_questions_root(role):
+    try:
+        role_q = question_generator.base_questions.get(role)
+        if not role_q:
+            return jsonify({'error': 'Role not found', 'available_roles': list(question_generator.base_questions.keys())}), 404
+        return (json.dumps({role: role_q}, indent=2), 200, {'Content-Type': 'application/json'})
+    except Exception as e:
+        print(f"Error in data_role_questions_root: {e}")
+        return jsonify({'error': 'internal error'}), 500
+
+@app.route('/data/questions/interview_questions.json')
+def data_all_questions():
+    try:
+        file_path = os.path.join(app.root_path, 'data', 'questions', 'interview_questions.json')
+        if os.path.exists(file_path):
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            return (content, 200, {'Content-Type': 'application/json'})
+        return (json.dumps({}), 200, {'Content-Type': 'application/json'})
+    except Exception as e:
+        print(f"Error serving interview_questions.json: {e}")
+        return jsonify({'error': 'internal error'}), 500
+
+@app.route('/api/session/questions')
+def api_session_questions_root():
+    if 'interview_id' not in session or 'questions' not in session:
+        return jsonify({'error': 'No active interview or questions not generated yet'}), 404
+    return jsonify({
+        'interview_id': session.get('interview_id'),
+        'role': session.get('job_role'),
+        'questions_source': session.get('questions_source'),
+        'questions': session.get('questions')
+    })
+
+@app.route('/api/questions_source')
+def api_questions_source_root():
+    source = session.get('questions_source') if 'interview_id' in session else None
+    return jsonify({'questions_source': source})
+
+
+@app.route('/api/verify_otp', methods=['POST'])
+def api_verify_otp():
+    """Verify OTP submitted from the client. If correct, mark session otp_verified True."""
+    try:
+        # Accept JSON or form payloads
+        data = request.get_json(silent=True) or request.form
+        otp = data.get('otp') if isinstance(data, dict) else None
+        if not otp:
+            return jsonify({'success': False, 'error': 'Missing OTP'}), 400
+
+        expected = session.get('interview_otp')
+        if not expected:
+            return jsonify({'success': False, 'error': 'No OTP for this session'}), 400
+
+        if str(otp).strip() == str(expected).strip():
+            session['otp_verified'] = True
+            # Mirror client-side sessionStorage state for convenience
+            return jsonify({'success': True})
+        else:
+            return jsonify({'success': False, 'error': 'OTP does not match'}), 400
+    except Exception as e:
+        print(f"Error verifying OTP: {e}")
+        return jsonify({'success': False, 'error': 'internal error'}), 500
+
+
+@app.route('/api/session/load_local_questions', methods=['POST'])
+def api_load_local_questions():
+    """Load local base questions into the session as a fallback when external APIs fail.
+    Request JSON: { "role": "software_engineer", "num": 12 }
+    """
+    try:
+        data = request.get_json(silent=True) or request.form
+        role = data.get('role') if isinstance(data, dict) else None
+        role = role or session.get('job_role', 'software_engineer')
+        try:
+            num = int(data.get('num')) if isinstance(data, dict) and data.get('num') else None
+        except Exception:
+            num = None
+
+        base = question_generator.base_questions.get(role)
+        if not base:
+            return jsonify({'success': False, 'error': 'Role not found', 'available_roles': list(question_generator.base_questions.keys())}), 404
+
+        # Build questions list - repeat if needed to reach num
+        questions = list(base)
+        if num:
+            while len(questions) < num:
+                questions.extend(base)
+            questions = questions[:num]
+
+        # Initialize session with questions
+        session['questions'] = questions
+        session['current_question'] = 0
+        session['questions_source'] = 'local'
+
+        print(f"✅ Loaded {len(questions)} local questions for role {role} into session")
+        return jsonify({'success': True, 'count': len(questions)})
+    except Exception as e:
+        print(f"Error loading local questions: {e}")
+        return jsonify({'success': False, 'error': 'internal error'}), 500
 
 @app.route('/interview_setup')
 def interview_setup():
@@ -79,6 +248,8 @@ def start_interview_with_name():
     session['responses'] = []
     session['start_time'] = datetime.now().isoformat()
     session['enable_voice'] = True
+    # Mark session as OTP verified for simpler start flow (dev-friendly)
+    session['otp_verified'] = True
 
     # Generate questions
     from config import Config
@@ -87,6 +258,13 @@ def start_interview_with_name():
 
     resume_analysis = session.get('resume_analysis', {})
     questions = question_generator.generate_questions_raw('software_engineer', resume_analysis, target_total)
+
+    # Record where questions came from
+    try:
+        session['questions_source'] = question_generator.last_generation_source
+        print(f"🧭 Questions source (root): {session['questions_source']}")
+    except Exception:
+        session['questions_source'] = None
 
     if not questions:
         questions = [{
@@ -100,6 +278,13 @@ def start_interview_with_name():
 
     # Return JSON response for frontend to handle redirect
     print(f"✅ Interview session initialized for {candidate_name}")
+    # If this is a normal form submission (non-AJAX), return an HTTP redirect to the interview room page so users without JS still continue.
+    accept_header = request.headers.get('Accept', '')
+    xreq = request.headers.get('X-Requested-With', '')
+    if xreq != 'XMLHttpRequest' and 'application/json' not in accept_header:
+        print("DEBUG: Non-AJAX form submit detected, issuing HTTP redirect to interview_room")
+        return redirect(url_for('interview_room'))
+
     return jsonify({
         'success': True,
         'redirect': url_for('interview_room')
@@ -261,7 +446,10 @@ def start_video_interview():
     resume_analysis = session.get('resume_analysis', {})
     
     # Initialize interview session first
-    session['interview_id'] = secrets.token_hex(16)
+    # Create database entry for this interview
+    interview_id = interview_db.create_interview(candidate_name, job_role)
+    session['interview_id'] = interview_id
+    
     session['candidate_name'] = candidate_name  # Store candidate name
     session['current_question'] = 0
     session['score'] = 0
@@ -271,10 +459,11 @@ def start_video_interview():
     session['enable_voice'] = True
     
     # Generate OTP for interview verification (6-digit code)
+    # For user convenience, we will auto-verify this session since they just clicked start
     otp_code = ''.join([str(random.randint(0, 9)) for _ in range(6)])
     session['interview_otp'] = otp_code
-    session['otp_expires'] = (datetime.now() + timedelta(minutes=10)).isoformat()  # OTP valid for 10 minutes
-    session['otp_verified'] = False
+    session['otp_expires'] = (datetime.now() + timedelta(minutes=10)).isoformat()
+    session['otp_verified'] = True  # Auto-verify to enable camera immediately
     
     # Interview length target (10-15 by config)
     from config import Config
@@ -283,16 +472,17 @@ def start_video_interview():
 
     # Generate only the first question now; generate subsequent questions sequentially (interviewer-style)
     print(f"🔄 Generating first question for {job_role} interview using Hugging Face API...")
+    
+    # Use question generator with fallback logic
     first_batch = question_generator.generate_questions_raw(job_role, resume_analysis, 1)
-    first_question = first_batch[0] if first_batch else {
+    
+    session['questions'] = first_batch if first_batch else [{
         "question": "Tell me about yourself and your most relevant experience for this role.",
         "type": "behavioral",
         "difficulty": "easy"
-    }
-
-    session['questions'] = [first_question]
-    print(f"✅ Interview initialized with 1/{target_total} questions (sequential generation enabled)")
-    print(f"🔐 OTP generated: {otp_code} (valid for 10 minutes)")
+    }]
+    print(f"✅ Interview initialized with ID {interview_id} and {len(session['questions'])} questions")
+    print(f"🔐 OTP generated: {otp_code} (Auto-verified)")
     
     return redirect(url_for('interview_room'))
 

@@ -40,199 +40,364 @@
             </div>
         </div>
 
-        <div class="interview-header">
-            <h2>Rishi Interview Session</h2>
-            <div class="progress-info">
-                Question {{ question_num }} of {{ total_questions }}
-                <div class="timer-container">
-                    <div class="timer-section">
-                        <span class="timer-label">Answer Time:</span>
-                        <div class="timer" id="answerTimer">30</div>
-                    </div>
+        <!-- OTP Verification Modal (dev-friendly) -->
+        <div id="otpModal" class="otp-modal" style="display: none;">
+            <div class="otp-modal-content">
+                <h3>🔐 Verify OTP to Start</h3>
+                <p>Enter the 6-digit OTP shown below to verify your session and enable camera/microphone.</p>
+                <div class="otp-display">
+                    <div><strong>OTP:</strong> <span id="otpCodeDisplay">{{ session.get('interview_otp', 'N/A')
+                            }}</span></div>
+                    <div style="font-size: 0.9rem; color: #7f8c8d; margin-top: .5rem;">(This is shown for local/dev
+                        convenience)</div>
                 </div>
-            </div>
-            <!-- Manual start button for debugging -->
-            <div style="margin-top: 1rem; text-align: center;">
-                <button id="manualStartBtn" class="btn btn-primary" style="background: #28a745; display: none;"
-                    onclick="showRobotForTesting()">
-                    🚀 Start Interview Manually
-                </button>
+                <div class="otp-input-group">
+                    <input id="otpInput" class="otp-input" type="text" maxlength="6" placeholder="Enter OTP" />
+                </div>
+                <div style="display:flex; gap:8px; justify-content:center; margin-top: 1rem;">
+                    <button id="verifyOtpBtn" class="btn btn-primary">Verify OTP</button>
+                    <button id="autoVerifyBtn" class="btn btn-secondary">Auto-verify (dev)</button>
+                </div>
+                <div id="otpError" class="otp-error" style="display: none; margin-top: 1rem;">Invalid OTP.</div>
+                <div style="margin-top: 1rem; font-size: 0.9rem; color: #7f8c8d;">If you don't see an OTP, try reloading
+                    the page or check server logs for the generated OTP.</div>
             </div>
         </div>
+    </div>
 
-        <div class="interview-content">
-            <!-- Video Feed -->
-            <div class="video-section">
-                <div class="video-container">
-                    <video id="interviewVideo" autoplay muted playsinline style="display: none;"></video>
-                    <!-- Robot Animation - Shows instead of camera feed -->
-                    <div id="robotAnimation" class="robot-animation" style="display: none;">
-                        <div class="robot-container">
-                            <div class="robot-head">
-                                <div class="robot-eyes">
-                                    <div class="robot-eye left-eye"></div>
-                                    <div class="robot-eye right-eye"></div>
-                                </div>
-                                <div class="robot-mouth"></div>
+    <script>
+        // GLOBAL ERROR HANDLER - Catches startup errors
+        window.onerror = function (msg, url, line, col, error) {
+            console.error('🔥 Global Error:', msg, url, line, error);
+            const errDiv = document.createElement('div');
+            errDiv.style.position = 'fixed';
+            errDiv.style.top = '0';
+            errDiv.style.left = '0';
+            errDiv.style.width = '100%';
+            errDiv.style.background = '#ffcccc';
+            errDiv.style.color = '#cc0000';
+            errDiv.style.padding = '10px';
+            errDiv.style.zIndex = '10000';
+            errDiv.style.borderBottom = '2px solid #cc0000';
+            errDiv.innerHTML = '<strong>System Error:</strong> ' + msg + ' <button onclick="this.parentNode.remove()">Dismiss</button>';
+            document.body.appendChild(errDiv);
+
+            // Failsafe: Force UI to show
+            document.body.classList.add('loaded');
+            const robot = document.getElementById('robotAnimation');
+            const placeholder = document.getElementById('cameraPlaceholder');
+            if (robot && placeholder) {
+                if (robot.style.display === 'none' && placeholder.style.display === 'none') {
+                    placeholder.style.display = 'flex'; // Restore placeholder
+                    placeholder.innerHTML = '<div style="text-align:center; color:red;"><h3>System Error</h3><p>Please refresh the page.</p></div>';
+                }
+            }
+            return false;
+        };
+
+        // UI FAILSAFE: Ensure content is visible after 3 seconds even if JS hangs
+        setTimeout(function () {
+            if (document.body.style.display === 'none' || document.body.style.opacity === '0') {
+                console.warn('⚠️ Failsafe triggered: Forcing body visibility');
+                document.body.style.display = 'block';
+                document.body.style.opacity = '1';
+            }
+            // Ensure loading overlay is gone
+            const overlay = document.getElementById('loadingOverlay');
+            if (overlay && overlay.style.display !== 'none') {
+                // If it's been 5 seconds and overlay is still there, hide it
+                console.warn('⚠️ Failsafe triggered: Hiding stuck loading overlay');
+                overlay.style.display = 'none';
+            }
+        }, 5000);
+    </script>
+
+    <script>
+        // On page load, if the server-side session already marked OTP verified, set client flag
+        try {
+            const serverOtpVerified = "{{ 'true' if session.get('otp_verified') else 'false' }}" === "true";
+            if (serverOtpVerified) {
+                sessionStorage.setItem('otpVerified', 'true');
+            }
+        } catch (e) { /* ignore if templating not possible */ }
+
+        // Show OTP modal when necessary
+        function showOtpModal() {
+            const otpModal = document.getElementById('otpModal');
+            if (otpModal) otpModal.style.display = 'flex';
+        }
+
+        // OTP verification logic (helper functions only, no overrides)
+        document.addEventListener('DOMContentLoaded', function () {
+            const verifyBtn = document.getElementById('verifyOtpBtn');
+            if (verifyBtn) {
+                verifyBtn.addEventListener('click', async function () {
+                    const code = document.getElementById('otpInput').value.trim();
+                    const err = document.getElementById('otpError');
+                    if (err) err.style.display = 'none';
+                    if (!code || code.length < 6) {
+                        if (err) {
+                            err.textContent = 'Please enter the 6-digit code';
+                            err.style.display = 'block';
+                        }
+                        return;
+                    }
+
+                    try {
+                        const resp = await fetch('/api/verify_otp', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ otp: code })
+                        });
+                        const data = await resp.json();
+                        if (resp.ok && data.success) {
+                            sessionStorage.setItem('otpVerified', 'true');
+                            const otpModal = document.getElementById('otpModal');
+                            if (otpModal) otpModal.style.display = 'none';
+                            // Trigger permissions flow now that OTP is verified
+                            // Use window.interviewManager if available
+                            if (window.interviewManager) window.interviewManager.requestPermissions();
+                        } else {
+                            if (err) {
+                                err.textContent = data.error || 'OTP verification failed';
+                                err.style.display = 'block';
+                            }
+                        }
+                    } catch (e) {
+                        if (err) {
+                            err.textContent = 'Verification error';
+                            err.style.display = 'block';
+                        }
+                    }
+                });
+            }
+
+            const autoVerifyBtn = document.getElementById('autoVerifyBtn');
+            if (autoVerifyBtn) {
+                autoVerifyBtn.addEventListener('click', async function () {
+                    try {
+                        const codeDisplay = document.getElementById('otpCodeDisplay');
+                        const code = codeDisplay ? codeDisplay.textContent.trim() : '000000';
+
+                        const resp = await fetch('/api/verify_otp', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ otp: code })
+                        });
+                        const data = await resp.json();
+                        if (resp.ok && data.success) {
+                            sessionStorage.setItem('otpVerified', 'true');
+                            const otpModal = document.getElementById('otpModal');
+                            if (otpModal) otpModal.style.display = 'none';
+                            if (window.interviewManager) window.interviewManager.requestPermissions();
+                        } else {
+                            alert('Auto-verify failed');
+                        }
+                    } catch (e) {
+                        console.error(e);
+                    }
+                });
+            }
+        });
+    </script>
+
+    <div class="interview-header">
+        <h2>Rishi Interview Session</h2>
+        <div class="progress-info">
+            Question {{ question_num }} of {{ total_questions }}
+            <div class="timer-container">
+                <div class="timer-section">
+                    <span class="timer-label">Answer Time:</span>
+                    <div class="timer" id="answerTimer">30</div>
+                </div>
+            </div>
+        </div>
+        <!-- Manual start button for debugging -->
+        <div style="margin-top: 1rem; text-align: center;">
+            <button id="manualStartBtn" class="btn btn-primary" style="background: #28a745; display: none;"
+                onclick="showRobotForTesting()">
+                🚀 Start Interview Manually
+            </button>
+        </div>
+    </div>
+
+    <div class="interview-content">
+        <!-- Video Feed -->
+        <div class="video-section">
+            <div class="video-container">
+                <video id="interviewVideo" autoplay muted playsinline style="display: none;"></video>
+                <!-- Robot Animation - Shows instead of camera feed -->
+                <div id="robotAnimation" class="robot-animation" style="display: none;">
+                    <div class="robot-container">
+                        <div class="robot-head">
+                            <div class="robot-eyes">
+                                <div class="robot-eye left-eye"></div>
+                                <div class="robot-eye right-eye"></div>
                             </div>
-                            <div class="robot-body">
-                                <div class="robot-chest">
-                                    <div class="robot-screen">
-                                        <div class="screen-content">
-                                            <div class="screen-text">RISHI</div>
-                                            <div class="screen-pulse"></div>
-                                            <!-- AI Avatar with pulsing effect -->
-                                            <div class="ai-avatar">
-                                                <div class="pulse-ring"></div>
-                                                <div class="core"></div>
-                                            </div>
+                            <div class="robot-mouth"></div>
+                        </div>
+                        <div class="robot-body">
+                            <div class="robot-chest">
+                                <div class="robot-screen">
+                                    <div class="screen-content">
+                                        <div class="screen-text">RISHI</div>
+                                        <div class="screen-pulse"></div>
+                                        <!-- AI Avatar with pulsing effect -->
+                                        <div class="ai-avatar">
+                                            <div class="pulse-ring"></div>
+                                            <div class="core"></div>
                                         </div>
                                     </div>
                                 </div>
-                                <div class="robot-arms">
-                                    <div class="robot-arm left-arm"></div>
-                                    <div class="robot-arm right-arm"></div>
-                                </div>
                             </div>
-                            <div class="robot-base">
-                                <div class="robot-legs">
-                                    <div class="robot-leg left-leg"></div>
-                                    <div class="robot-leg right-leg"></div>
-                                </div>
+                            <div class="robot-arms">
+                                <div class="robot-arm left-arm"></div>
+                                <div class="robot-arm right-arm"></div>
                             </div>
                         </div>
-                        <div class="robot-glow"></div>
-                    </div>
-                    <div id="cameraPlaceholder" class="camera-placeholder">
-                        <div class="placeholder-content">
-                            <div class="placeholder-icon">🤖</div>
-                            <p>AI Interviewer will appear here</p>
-                            <button id="enableCamera" class="btn btn-primary">Start Interview</button>
+                        <div class="robot-base">
+                            <div class="robot-legs">
+                                <div class="robot-leg left-leg"></div>
+                                <div class="robot-leg right-leg"></div>
+                            </div>
                         </div>
                     </div>
-                    <div class="video-overlay">
-                        <div class="status-indicator" id="statusIndicator">
-                            <span class="status-dot"></span>
-                            <span id="statusText">Click "Start Interview" to begin</span>
-                        </div>
-                        <!-- Physical Analysis Indicators with Animations -->
-                        <div id="physicalAnalysisIndicator"
-                            style="display: none; position: absolute; top: 50px; left: 15px; background: rgba(102, 126, 234, 0.95); backdrop-filter: blur(10px); color: white; padding: 15px 20px; border-radius: 25px; font-size: 13px; font-weight: 600; box-shadow: 0 8px 25px rgba(0,0,0,0.3); z-index: 100; min-width: 200px;">
-                            <div
-                                style="font-size: 14px; font-weight: 700; margin-bottom: 10px; text-align: center; border-bottom: 2px solid rgba(255,255,255,0.3); padding-bottom: 8px;">
-                                📊 Live Analysis</div>
-                            <div id="confidenceScore" class="analysis-item">
-                                <span class="analysis-label">Confidence:</span>
-                                <span class="analysis-value" id="confidenceValue">--</span>
-                                <div class="analysis-bar">
-                                    <div class="analysis-bar-fill" id="confidenceBar" style="width: 0%;"></div>
-                                </div>
-                            </div>
-                            <div id="voiceScore" class="analysis-item">
-                                <span class="analysis-label">Voice:</span>
-                                <span class="analysis-value" id="voiceValue">--</span>
-                                <div class="analysis-bar">
-                                    <div class="analysis-bar-fill" id="voiceBar" style="width: 0%;"></div>
-                                </div>
-                            </div>
-                            <div id="bodyLanguageScore" class="analysis-item">
-                                <span class="analysis-label">Body Language:</span>
-                                <span class="analysis-value" id="bodyLanguageValue">--</span>
-                                <div class="analysis-bar">
-                                    <div class="analysis-bar-fill" id="bodyLanguageBar" style="width: 0%;"></div>
-                                </div>
-                            </div>
-                            <div id="physicalScore" class="analysis-item"
-                                style="margin-top: 10px; padding-top: 10px; border-top: 2px solid rgba(255,255,255,0.3); font-weight: 700;">
-                                <span class="analysis-label">Overall Score:</span>
-                                <span class="analysis-value" id="physicalScoreValue" style="font-size: 16px;">--</span>
-                                <div class="analysis-bar">
-                                    <div class="analysis-bar-fill" id="physicalScoreBar"
-                                        style="width: 0%; background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%);">
-                                    </div>
-                                </div>
+                    <div class="robot-glow"></div>
+                </div>
+                <div id="cameraPlaceholder" class="camera-placeholder">
+                    <div class="placeholder-content">
+                        <div class="placeholder-icon">🤖</div>
+                        <p>AI Interviewer will appear here</p>
+                        <button id="enableCamera" class="btn btn-primary">Start Interview</button>
+                    </div>
+                </div>
+                <div class="video-overlay">
+                    <div class="status-indicator" id="statusIndicator">
+                        <span class="status-dot"></span>
+                        <span id="statusText">Click "Start Interview" to begin</span>
+                    </div>
+                    <!-- Physical Analysis Indicators with Animations -->
+                    <div id="physicalAnalysisIndicator"
+                        style="display: none; position: absolute; top: 50px; left: 15px; background: rgba(102, 126, 234, 0.95); backdrop-filter: blur(10px); color: white; padding: 15px 20px; border-radius: 25px; font-size: 13px; font-weight: 600; box-shadow: 0 8px 25px rgba(0,0,0,0.3); z-index: 100; min-width: 200px;">
+                        <div
+                            style="font-size: 14px; font-weight: 700; margin-bottom: 10px; text-align: center; border-bottom: 2px solid rgba(255,255,255,0.3); padding-bottom: 8px;">
+                            📊 Live Analysis</div>
+                        <div id="confidenceScore" class="analysis-item">
+                            <span class="analysis-label">Confidence:</span>
+                            <span class="analysis-value" id="confidenceValue">--</span>
+                            <div class="analysis-bar">
+                                <div class="analysis-bar-fill" id="confidenceBar" style="width: 0%;"></div>
                             </div>
                         </div>
-                        <div class="ai-speaking-indicator" id="aiSpeakingIndicator" style="display: none;">
-                            <div class="ai-avatar">🤖</div>
-                            <div class="ai-speech-bubble" id="aiSpeechBubble">
-                                <p id="aiQuestionText">{{ question.question if question else "Loading question..." }}
-                                </p>
+                        <div id="voiceScore" class="analysis-item">
+                            <span class="analysis-label">Voice:</span>
+                            <span class="analysis-value" id="voiceValue">--</span>
+                            <div class="analysis-bar">
+                                <div class="analysis-bar-fill" id="voiceBar" style="width: 0%;"></div>
                             </div>
                         </div>
-                        <div class="recording-indicator" id="recordingIndicator" style="display: none;">
-                            <span class="recording-dot"></span>
-                            You are Speaking
+                        <div id="bodyLanguageScore" class="analysis-item">
+                            <span class="analysis-label">Body Language:</span>
+                            <span class="analysis-value" id="bodyLanguageValue">--</span>
+                            <div class="analysis-bar">
+                                <div class="analysis-bar-fill" id="bodyLanguageBar" style="width: 0%;"></div>
+                            </div>
                         </div>
+                        <div id="physicalScore" class="analysis-item"
+                            style="margin-top: 10px; padding-top: 10px; border-top: 2px solid rgba(255,255,255,0.3); font-weight: 700;">
+                            <span class="analysis-label">Overall Score:</span>
+                            <span class="analysis-value" id="physicalScoreValue" style="font-size: 16px;">--</span>
+                            <div class="analysis-bar">
+                                <div class="analysis-bar-fill" id="physicalScoreBar"
+                                    style="width: 0%; background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%);">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="ai-speaking-indicator" id="aiSpeakingIndicator">
+                        <div class="ai-avatar">🤖</div>
+                        <div class="ai-speech-bubble" id="aiSpeechBubble">
+                            <p id="aiQuestionText">{{ question.question|e if question else "Loading question..." }}
+                            </p>
+                        </div>
+                    </div>
+                    <div class="recording-indicator" id="recordingIndicator" style="display: none;">
+                        <span class="recording-dot"></span>
+                        You are Speaking
                     </div>
                 </div>
             </div>
+        </div>
 
-            <!-- Question Section -->
-            <div class="question-section">
-                <!-- Chatbot Button - Shows answer section when clicked -->
-                <div class="chatbot-button-container" id="chatbotButtonContainer" style="display: block;">
+        <!-- Question Section -->
+        <div class="question-section">
+            <!-- Chatbot Button - Shows answer section when clicked -->
+            <div class="chatbot-button-container" id="chatbotButtonContainer" style="display: block;">
+                <div style="display: flex; gap: 10px; justify-content: center;">
                     <button id="chatbotButton" class="btn btn-primary btn-large chatbot-btn">
                         💬 Open Chatbot to Respond
                     </button>
+                    <!-- Skip button moved here to be always visible -->
+                    <button type="button" id="skipButtonMain" class="btn btn-secondary btn-large">
+                        ⏭️ Skip Question
+                    </button>
                 </div>
+            </div>
 
-                <!-- Answer Section - Hidden by default, shown when chatbot button is clicked -->
-                <div class="answer-section" id="answerSection" style="display: none;">
-                    <div class="answer-section-header">
-                        <h4>💬 Your Response</h4>
-                        <button type="button" id="closeAnswerSection" class="btn btn-small btn-secondary">✕
-                            Close</button>
+            <!-- Answer Section - Hidden by default, shown when chatbot button is clicked -->
+            <div class="answer-section" id="answerSection" style="display: none;">
+                <div class="answer-section-header">
+                    <h4>💬 Your Response</h4>
+                    <button type="button" id="closeAnswerSection" class="btn btn-small btn-secondary">✕
+                        Close</button>
+                </div>
+                <form id="answerForm">
+                    <div class="form-group">
+                        <label for="answer">Your Response:</label>
+                        <textarea id="answer" name="answer" rows="6"
+                            placeholder="Rishi has asked you a question. Please respond by typing or using voice..."
+                            required></textarea>
                     </div>
-                    <form id="answerForm">
-                        <div class="form-group">
-                            <label for="answer">Your Response:</label>
-                            <textarea id="answer" name="answer" rows="6"
-                                placeholder="Rishi has asked you a question. Please respond by typing or using voice..."
-                                required></textarea>
-                        </div>
 
-                        <!-- Voice Input Section -->
-                        <div class="voice-section">
-                            <div class="voice-controls">
-                                <button type="button" id="voiceButton" class="btn btn-voice">
-                                    🎤 Speak Your Answer
-                                </button>
-                                <button type="button" id="stopVoiceButton" class="btn btn-secondary"
-                                    style="display: none;">
-                                    ⏹️ Stop Speaking
-                                </button>
-                            </div>
-                            <div id="voiceStatus" class="voice-status">
-                                Click the microphone to speak your response
-                            </div>
-                            <div id="voicePreview" class="voice-preview"></div>
-
-                            <!-- Audio Visualizer -->
-                            <div class="audio-visualizer">
-                                <canvas id="visualizer" width="300" height="50" style="display: none;"></canvas>
-                            </div>
+                    <!-- Voice Input Section -->
+                    <div class="voice-section">
+                        <div class="voice-controls">
+                            <button type="button" id="voiceButton" class="btn btn-voice">
+                                🎤 Speak Your Answer
+                            </button>
+                            <button type="button" id="stopVoiceButton" class="btn btn-secondary" style="display: none;">
+                                ⏹️ Stop Speaking
+                            </button>
                         </div>
-
-                        <div class="action-buttons">
-                            <button type="submit" class="btn btn-primary">Submit Response</button>
-                            <button type="button" id="skipButton" class="btn btn-secondary">Skip Question</button>
+                        <div id="voiceStatus" class="voice-status">
+                            Click the microphone to speak your response
                         </div>
-                    </form>
-                </div>
+                        <div id="voicePreview" class="voice-preview"></div>
+
+                        <!-- Audio Visualizer -->
+                        <div class="audio-visualizer">
+                            <canvas id="visualizer" width="300" height="50" style="display: none;"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="action-buttons">
+                        <button type="submit" class="btn btn-primary">Submit Response</button>
+                    </div>
+                </form>
             </div>
-        </div>
-
-        <!-- Feedback Section -->
-        <div id="feedbackSection" class="feedback-section" style="display: none;">
-            <h4>Rishi Feedback:</h4>
-            <div id="feedbackContent"></div>
-            <div class="auto-next-countdown">
-                Next question in: <span id="nextCountdown">5</span> seconds
-            </div>
-            <button id="nextQuestionBtn" class="btn btn-primary">Next Question Now</button>
         </div>
     </div>
+
+    <!-- Feedback Section -->
+    <div id="feedbackSection" class="feedback-section" style="display: none;">
+        <h4>Rishi Feedback:</h4>
+        <div id="feedbackContent"></div>
+        <div class="auto-next-countdown">
+            Next question in: <span id="nextCountdown">5</span> seconds
+        </div>
+        <button id="nextQuestionBtn" class="btn btn-primary">Next Question Now</button>
+    </div>
+</div>
 </div>
 
 <!-- Loading Overlay -->
@@ -354,10 +519,13 @@
                     // Hide speaking indicator
                     const indicator = document.getElementById('aiSpeakingIndicator');
                     if (indicator) {
-                        // Keep it visible briefly, then hide
+                        // Keep visible for a moment
                         setTimeout(() => {
-                            if (indicator) indicator.style.display = 'none';
-                        }, 500);
+                            // Don't hide completely if we want to show the question text
+                            // indicator.style.display = 'none'; 
+                            // Instead just stop the animation effect if any
+                            indicator.classList.remove('active-speaking');
+                        }, 2000);
                     }
                     // Remove robot speaking animation
                     const robotAnimation = document.getElementById('robotAnimation');
@@ -404,12 +572,22 @@
                             this.synthesis.cancel();
                             // Wait a bit before starting new speech
                             setTimeout(() => {
-                                this.synthesis.speak(this.currentUtterance);
-                                console.log('🗣️ TTS started speaking (after cancel)');
+                                if (this.currentUtterance instanceof SpeechSynthesisUtterance) {
+                                    this.synthesis.speak(this.currentUtterance);
+                                    console.log('🗣️ TTS started speaking (after cancel)');
+                                } else {
+                                    console.error('❌ Invalid Utterance object (after cancel)');
+                                    resolve();
+                                }
                             }, 100);
                         } else {
-                            this.synthesis.speak(this.currentUtterance);
-                            console.log('🗣️ TTS started speaking');
+                            if (this.currentUtterance instanceof SpeechSynthesisUtterance) {
+                                this.synthesis.speak(this.currentUtterance);
+                                console.log('🗣️ TTS started speaking');
+                            } else {
+                                console.error('❌ Invalid Utterance object');
+                                resolve();
+                            }
                         }
                     } catch (error) {
                         console.error('❌ Error starting TTS:', error);
@@ -700,7 +878,7 @@
     }
 
     // Interview State Management
-    class InterviewTimer {
+    class InterviewSessionManager {
         constructor(duration, displayElement) {
             // Support both parameter styles for compatibility
             this.listeningTime = 0; // No thinking time - go directly to answering
@@ -760,35 +938,29 @@
         }
 
         async requestPermissions() {
-            // Check OTP verification first
-            const otpVerified = sessionStorage.getItem('otpVerified') === 'true';
-            if (!otpVerified) {
-                alert('Please verify OTP first before starting the interview.');
-                return;
+            console.log('🔐 requestPermissions called');
+
+            // UI Feedback: Show we are working
+            const enableBtn = document.getElementById('enableCamera');
+            const statusText = document.getElementById('statusText');
+
+            if (enableBtn) {
+                enableBtn.disabled = true;
+                enableBtn.textContent = '⌛ Checking System...';
             }
+            if (statusText) statusText.textContent = 'Requesting camera & microphone access...';
+
+            // Bypass strict client-side OTP check if server verified session exists
+            const otpVerified = sessionStorage.getItem('otpVerified') === 'true';
 
             try {
                 console.log('🔐 Requesting camera and microphone permissions...');
-                // Try to enter fullscreen (requires user gesture; will work when button is clicked)
-                try {
-                    if (document.documentElement.requestFullscreen) {
-                        await document.documentElement.requestFullscreen();
-                        console.log('🖥️ Fullscreen enabled');
-                    }
-                } catch (e) {
-                    console.log('ℹ️ Fullscreen not enabled (browser blocked or not requested via gesture)');
-                }
 
-                // Show loading state
-                document.getElementById('statusText').textContent = 'Requesting permissions...';
-                document.getElementById('requestPermissions').disabled = true;
-                document.getElementById('requestPermissions').textContent = 'Requesting...';
-
-                // Request camera and microphone permissions with persistent constraints
+                // Request camera and microphone permissions
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: {
-                        width: 1280,
-                        height: 720,
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 },
                         facingMode: 'user'
                     },
                     audio: {
@@ -800,119 +972,116 @@
 
                 console.log('✅ Permissions granted successfully!');
 
-                // Store stream for cleanup (but don't stop it during interview!)
+                // Store stream
                 this.mediaStream = stream;
 
-                // Monitor stream health - restart if it stops unexpectedly
-                stream.getVideoTracks().forEach(track => {
-                    track.onended = () => {
-                        console.warn('⚠️ Video track ended unexpectedly');
-                        if (this.currentState !== 'completed') {
-                            console.log('🔄 Attempting to restore video stream...');
-                            // Don't auto-restart, let user know
-                            document.getElementById('statusText').textContent = 'Camera disconnected. Please refresh.';
-                        }
-                    };
-                });
+                // Monitor stream health
+                this.monitorStreamHealth(stream);
 
-                stream.getAudioTracks().forEach(track => {
-                    track.onended = () => {
-                        console.warn('⚠️ Audio track ended unexpectedly');
-                        if (this.currentState !== 'completed') {
-                            console.log('🔄 Attempting to restore audio stream...');
-                            document.getElementById('statusText').textContent = 'Microphone disconnected. Please refresh.';
-                        }
-                    };
-                });
-
-                // Permissions granted - store in sessionStorage
+                // Permissions granted
                 sessionStorage.setItem('cameraMicPermissions', 'true');
                 this.permissionsGranted = true;
 
-                // Show robot animation instead of video feed, hide placeholder and permission warning
-                document.getElementById('interviewVideo').srcObject = stream;
-                document.getElementById('interviewVideo').style.display = 'none'; // Keep video hidden from user
-                document.getElementById('robotAnimation').style.display = 'flex'; // Show robot animation
-                document.getElementById('cameraPlaceholder').style.display = 'none';
-                document.getElementById('permissionWarning').style.display = 'none';
+                // UI Update: Success
+                if (enableBtn) enableBtn.textContent = '✅ System Ready';
+                if (statusText) statusText.textContent = 'System Ready! Starting interview...';
 
-                console.log('🎭 Robot animation should now be visible!');
-                console.log('🤖 Robot element:', document.getElementById('robotAnimation'));
-                console.log('🤖 Robot display style:', document.getElementById('robotAnimation').style.display);
+                // Setup Video Element
+                const videoEl = document.getElementById('interviewVideo');
+                if (videoEl) {
+                    videoEl.srcObject = stream;
+                    videoEl.style.display = 'block'; // Show video
+                    // Ensure it plays
+                    videoEl.play().catch(e => console.error("Video play error:", e));
+                }
 
-                // Initialize voice recognition with the stream
+                // Hide Placeholder / Robot
+                const placeholder = document.getElementById('cameraPlaceholder');
+                const robot = document.getElementById('robotAnimation');
+                if (placeholder) placeholder.style.display = 'none';
+                if (robot) robot.style.display = 'none'; // Use real video if available
+
+                // Initialize Voice Recognition
                 if (typeof voiceRecognition !== 'undefined') {
                     voiceRecognition.initialize(stream);
-                    // Store stream reference in voiceRecognition for cleanup
                     voiceRecognition.mediaStream = stream;
                 }
 
-                // Initialize physical analysis manager
-                const videoElement = document.getElementById('interviewVideo');
-                if (videoElement) {
-                    this.physicalAnalyzer.initialize(videoElement, stream);
-                    // Start physical analysis immediately when camera is on
+                // Initialize Physical Analysis
+                if (videoEl) {
+                    this.physicalAnalyzer.initialize(videoEl, stream);
                     this.physicalAnalyzer.startCollecting();
-                    // Show physical analysis indicator with animations
                     const indicator = document.getElementById('physicalAnalysisIndicator');
                     if (indicator) {
                         indicator.style.display = 'block';
                         indicator.classList.add('animate-in');
                     }
-                    console.log('✅ Physical analysis started immediately - camera is checking confidence/behavior');
                 }
 
-                // Buttons enabled (mute button removed)
-
-                // Update status
-                document.getElementById('statusText').textContent = 'Permissions granted! Starting interview...';
-                document.getElementById('timeInfo').textContent = 'Rishi will ask the first question shortly';
-
-                // Show AI speaking indicator
-                document.getElementById('aiSpeakingIndicator').style.display = 'flex';
-
-                // Make robot more animated when speaking
-                const robotAnimation = document.getElementById('robotAnimation');
-                if (robotAnimation) {
-                    robotAnimation.classList.add('robot-speaking');
-                }
-
-                // Start the interview after a brief delay
-                // Ensure camera and microphone are fully enabled before starting
+                // Proceed to Interview after short delay
                 setTimeout(() => {
-                    // Double-check permissions are still active
-                    if (stream && stream.active) {
-                        console.log('✅ Stream is active - starting interview');
-                        this.startAISpeakingPhase();
-                    } else {
-                        console.warn('⚠️ Stream not active - requesting again');
-                        this.requestPermissions();
-                    }
-                }, 2000);
+                    this.startAISpeakingPhase();
+                }, 1500);
 
             } catch (error) {
                 console.error('❌ Permission error:', error);
-                this.handlePermissionError(error);
 
-                // Reset button state
-                document.getElementById('requestPermissions').disabled = false;
-                document.getElementById('requestPermissions').textContent = '🎤 Start Interview & Enable Camera';
+                // Reset button slightly so they know something happened, but proceed to robot mode
+                if (enableBtn) {
+                    enableBtn.textContent = '⚠️ Camera blocked';
+                }
+
+                // Handle Error -> Fallback to Robot Mode
+                this.handlePermissionError(error);
             }
         }
 
-        handlePermissionError(error) {
-            // Show robot animation as fallback for testing even if camera fails
-            document.getElementById('robotAnimation').style.display = 'flex';
-            document.getElementById('cameraPlaceholder').style.display = 'none';
-            console.log('🤖 Showing robot animation as fallback after permission error');
+        monitorStreamHealth(stream) {
+            stream.getVideoTracks().forEach(track => {
+                track.onended = () => {
+                    console.warn('⚠️ Video track ended unexpectedly');
+                    // Optional: handle disconnect
+                };
+            });
+            stream.getAudioTracks().forEach(track => {
+                track.onended = () => {
+                    console.warn('⚠️ Audio track ended unexpectedly');
+                };
+            });
+        }
 
-            // Set permissions as granted for robot mode
+        handlePermissionError(error) {
+            console.error('⚠️ Handling Permission Error:', error);
+
+            // 1. Force Robot Display
+            const robot = document.getElementById('robotAnimation');
+            const placeholder = document.getElementById('cameraPlaceholder');
+            const video = document.getElementById('interviewVideo');
+
+            if (video) video.style.display = 'none';
+            if (placeholder) placeholder.style.display = 'none';
+
+            if (robot) {
+                robot.style.display = 'flex';
+                // Force visibility styles just in case
+                robot.style.visibility = 'visible';
+                robot.style.opacity = '1';
+                console.log('🤖 Robot animation forced to display');
+            } else {
+                console.error('❌ Robot element missing in DOM!');
+            }
+
+            // 2. Set State
             this.permissionsGranted = true;
             sessionStorage.setItem('cameraMicPermissions', 'robot-mode');
 
             // Still show the warning but allow interview to proceed
             document.getElementById('permissionWarning').style.display = 'block';
             document.getElementById('permissionHelp').style.display = 'block';
+
+            // Hide loading overlay!
+            const overlay = document.getElementById('loadingOverlay');
+            if (overlay) overlay.style.display = 'none';
 
             const statusText = document.getElementById('statusText');
             const timeInfo = document.getElementById('timeInfo');
@@ -934,7 +1103,7 @@
             // Start interview even without camera permissions
             setTimeout(() => {
                 this.startAISpeakingPhase();
-            }, 2000);
+            }, 1000);
         }
 
         startAISpeakingPhase() {
@@ -952,10 +1121,12 @@
             const aiSpeakingIndicator = document.getElementById('aiSpeakingIndicator');
 
             // Update UI for AI speaking phase
-            statusText.textContent = 'Rishi is Speaking';
-            timeInfo.textContent = 'Listen carefully to the question...';
-            listeningTimerElement.textContent = this.listeningTime;
-            listeningTimerElement.className = 'timer ai-speaking';
+            if (statusText) statusText.textContent = 'Rishi is Speaking';
+            if (timeInfo) timeInfo.textContent = 'Listen carefully to the question...';
+            if (listeningTimerElement) {
+                listeningTimerElement.textContent = this.listeningTime;
+                listeningTimerElement.className = 'timer ai-speaking';
+            }
 
             // Show AI speaking indicator
             if (aiSpeakingIndicator) {
@@ -964,7 +1135,8 @@
 
             // Get question text - ensure we have the question
             let questionText = '';
-            const questionTextElement = document.getElementById('questionText');
+            // Try aiQuestionText first as it matches the HTML
+            const questionTextElement = document.getElementById('aiQuestionText') || document.getElementById('questionText');
             if (questionTextElement) {
                 questionText = questionTextElement.textContent || questionTextElement.innerText;
             }
@@ -1028,6 +1200,22 @@
                     }, 500);
                 });
         }
+        autoStartMicrophone() {
+            console.log('🎤 autoStartMicrophone called');
+            if (this.permissionsGranted && typeof voiceRecognition !== 'undefined') {
+                try {
+                    if (!voiceRecognition.isListening) {
+                        voiceRecognition.startListening();
+                        updateVoiceUI('listening');
+                        console.log('✅ Microphone auto-started');
+                    }
+                } catch (error) {
+                    console.warn('⚠️ Could not auto-start microphone:', error);
+                }
+            } else {
+                console.warn('⚠️ Cannot auto-start microphone: permissions not granted or voiceRecognition missing');
+            }
+        }
 
         startAnsweringPhase() {
             console.log('🎯 startAnsweringPhase called, answerTime:', this.answerTime);
@@ -1089,20 +1277,22 @@
             }
 
             // Update UI for answering phase
-            listeningTimerElement.className = 'timer completed';
-            answerTimerElement.className = 'timer active';
-            statusText.textContent = 'Answer the Question';
-            timeInfo.textContent = `Respond now: ${this.remaining} seconds remaining`;
+            if (listeningTimerElement) listeningTimerElement.className = 'timer completed';
+            if (answerTimerElement) answerTimerElement.className = 'timer active';
+            if (statusText) statusText.textContent = 'Answer the Question';
+            if (timeInfo) timeInfo.textContent = `Respond now: ${this.remaining} seconds remaining`;
 
             this.answerTimer = setInterval(() => {
                 console.log('⏰ Timer tick, remaining before:', this.remaining);
                 this.remaining--;
                 console.log('⏰ Timer tick, remaining after:', this.remaining);
-                answerTimerElement.textContent = this.remaining;
 
-                // Show warning when 5 seconds remaining (for 30-second timer)
-                if (this.remaining <= 5) {
-                    answerTimerElement.classList.add('warning');
+                if (answerTimerElement) {
+                    answerTimerElement.textContent = this.remaining;
+                    // Show warning when 5 seconds remaining (for 30-second timer)
+                    if (this.remaining <= 5) {
+                        answerTimerElement.classList.add('warning');
+                    }
                 }
 
                 if (this.remaining <= 0) {
@@ -1220,7 +1410,11 @@
                 // Update progress text if visible
                 const progressInfo = document.querySelector('.progress-info');
                 if (progressInfo && data.question_num && data.total_questions) {
-                    progressInfo.firstChild.textContent = `Question ${data.question_num} of ${data.total_questions} `;
+                    if (progressInfo.firstChild) {
+                        progressInfo.firstChild.textContent = `Question ${data.question_num} of ${data.total_questions} `;
+                    } else {
+                        progressInfo.textContent = `Question ${data.question_num} of ${data.total_questions} `;
+                    }
                 }
 
                 // Restart interview flow for the new question
@@ -1231,7 +1425,10 @@
                 }
             } catch (e) {
                 console.error('❌ Error loading next question:', e);
-                alert('Could not load next question. Please refresh and try again.');
+                // Don't alert - just try to recover or redirect
+                if (e.message && e.message.includes('400')) {
+                    window.location.href = '/results';
+                }
             }
         }
 
@@ -1293,25 +1490,71 @@
         try {
             const answerTimerElement = document.getElementById('answerTimer');
             if (answerTimerElement) {
-                interviewTimer = new InterviewTimer(30, answerTimerElement); // Pass parameters for compatibility
+                interviewTimer = new InterviewSessionManager(30, answerTimerElement); // Pass parameters for compatibility
                 // Make it globally accessible for testing
                 window.interviewManager = interviewTimer;
                 console.log('✅ InterviewTimer initialized successfully');
             } else {
                 console.warn('⚠️ answerTimer element not found during initialization');
                 // Create with null display element
-                interviewTimer = new InterviewTimer(30, null);
+                interviewTimer = new InterviewSessionManager(30, null);
                 window.interviewManager = interviewTimer;
             }
 
             textToSpeech = new TextToSpeech();
             console.log('✅ TextToSpeech initialized successfully');
+
+            // Setup button listeners
+            setupButtonListeners();
         } catch (error) {
             console.error('❌ Error initializing global instances:', error);
             // Create fallback instances
             interviewTimer = { start: () => { }, stop: () => { } };
             textToSpeech = { speakQuestion: () => Promise.resolve() };
             window.interviewManager = interviewTimer;
+        }
+    }
+
+    // Setup event listeners for UI buttons
+    function setupButtonListeners() {
+        // Chatbot Button
+        const chatbotBtn = document.getElementById('chatbotButton');
+        if (chatbotBtn) {
+            chatbotBtn.addEventListener('click', function (e) {
+                e.preventDefault();
+                document.getElementById('chatbotButtonContainer').classList.add('hidden');
+                document.getElementById('answerSection').classList.add('visible');
+                // Auto focus answer box
+                const answerBox = document.getElementById('answer');
+                if (answerBox) answerBox.focus();
+            });
+        }
+
+        // Close Answer Section Button
+        const closeBtn = document.getElementById('closeAnswerSection');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', function (e) {
+                e.preventDefault();
+                document.getElementById('answerSection').classList.remove('visible');
+                document.getElementById('chatbotButtonContainer').classList.remove('hidden');
+            });
+        }
+
+
+
+        // Main Skip Button (New)
+        const skipBtnMain = document.getElementById('skipButtonMain');
+        if (skipBtnMain) {
+            skipBtnMain.addEventListener('click', function (e) {
+                e.preventDefault();
+                if (confirm('Are you sure you want to skip this question?')) {
+                    if (window.interviewManager) {
+                        window.interviewManager.loadNextQuestion();
+                    } else {
+                        window.location.reload();
+                    }
+                }
+            });
         }
     }
 
@@ -1380,31 +1623,34 @@
     }
 
     // Main interview start function
+    // Main interview start function - Robust Version
     function startInterview() {
-        try {
-            console.log('🎯 startInterview() called');
+        console.log('🎯 startInterview() called');
 
-            // Use the fallback method which handles TTS and interview flow
-            if (typeof fallbackStartInterview === 'function') {
-                fallbackStartInterview();
+        // Safety: Ensure loading overlay is hidden
+        const overlay = document.getElementById('loadingOverlay');
+        if (overlay) overlay.style.display = 'none';
+
+        try {
+            // Ensure interview manager is initialized
+            if (!window.interviewManager) {
+                console.error('❌ interviewManager not found, initializing...');
+                initializeGlobalInstances();
+            }
+
+            if (window.interviewManager) {
+                console.log('✅ Calling interviewManager.requestPermissions()...');
+                // This is the main entry point
+                window.interviewManager.requestPermissions();
             } else {
-                console.error('❌ fallbackStartInterview function not available');
+                throw new Error('Failed to initialize interview manager');
             }
-        } catch (error) {
-            console.error('❌ Error in startInterview:', error);
-            // Last resort: try to manually trigger TTS
-            console.log('🔄 Last resort: trying manual TTS...');
-            try {
-                const questionTextElement = document.getElementById('questionText');
-                if (questionTextElement && textToSpeech && typeof textToSpeech.speakQuestion === 'function') {
-                    const questionText = questionTextElement.textContent || questionTextElement.innerText;
-                    if (questionText) {
-                        textToSpeech.speakQuestion(`Question 1. ${questionText}`);
-                    }
-                }
-            } catch (manualError) {
-                console.error('❌ Manual TTS also failed:', manualError);
-            }
+        } catch (e) {
+            console.error('❌ Critical Error in startInterview:', e);
+            alert('Could not start interview: ' + e.message);
+            // Attempt to restore UI
+            const placeholder = document.getElementById('cameraPlaceholder');
+            if (placeholder) placeholder.style.display = 'flex';
         }
     }
 
@@ -1484,7 +1730,7 @@
             setTimeout(() => {
                 try {
                     // Get question text
-                    const questionTextElement = document.getElementById('questionText');
+                    const questionTextElement = document.getElementById('aiQuestionText') || document.getElementById('questionText');
                     let questionText = '';
                     if (questionTextElement) {
                         questionText = questionTextElement.textContent || questionTextElement.innerText;
@@ -1528,303 +1774,242 @@
         }
     }
 
+    // Consolidating startup logic
     document.addEventListener('DOMContentLoaded', function () {
         try {
             console.log('🚀 Interview room DOMContentLoaded triggered');
-
-            // Initialize global instances now that DOM is ready
             initializeGlobalInstances();
 
-            // Check if required elements exist
-            const robotElement = document.getElementById('robotAnimation');
-            const questionElement = document.getElementById('aiQuestionText');
-            const interviewManager = window.interviewManager;
+            // Force visibility
+            const overlay = document.getElementById('loadingOverlay');
+            if (overlay) overlay.style.display = 'none';
+            document.body.classList.add('loaded');
 
-            console.log('📊 Question text:', questionElement ? questionElement.textContent : 'NOT FOUND');
-            console.log('🤖 Robot element:', robotElement ? 'FOUND' : 'NOT FOUND');
-            console.log('🎯 Interview manager:', interviewManager ? 'AVAILABLE' : 'NOT FOUND');
-
-            // Apply CSS fixes immediately
+            // Force reflow and apply fixes
             if (typeof applyCSSFixes === 'function') {
                 applyCSSFixes();
             }
 
-            // Apply again after a short delay to ensure DOM is fully ready
+            // Auto-start or show permission warning
             setTimeout(() => {
-                if (typeof applyCSSFixes === 'function') {
-                    applyCSSFixes();
-                }
-                document.body.classList.add('loaded');
-                console.log('✅ CSS fixes applied (delayed)');
-            }, 100);
-
-            // Apply again after stylesheets are fully loaded
-            window.addEventListener('load', function () {
-                setTimeout(() => {
-                    if (typeof applyCSSFixes === 'function') {
-                        applyCSSFixes();
-                    }
-                    console.log('✅ CSS fixes applied (after load)');
-                }, 50);
-            });
-
-            // Auto-start interview with robot animation (no camera required)
-            console.log('🤖 Auto-starting interview with robot animation...');
-            setTimeout(() => {
-                try {
-                    console.log('🤖 Calling showRobotForTesting()...');
+                const robot = document.getElementById('robotAnimation');
+                if (!robot || robot.style.display === 'none') {
+                    console.log('🤖 Auto-starting interview with robot animation...');
                     showRobotForTesting();
-                    console.log('✅ showRobotForTesting() called successfully');
-                } catch (error) {
-                    console.error('❌ Error in auto-start:', error);
-                    // Show manual start button as fallback
-                    const manualBtn = document.getElementById('manualStartBtn');
-                    if (manualBtn) {
-                        manualBtn.style.display = 'inline-block';
-                        console.log('🔄 Manual start button shown due to auto-start failure');
-                    }
-                    // Fallback: try to start interview directly
-                    console.log('🔄 Trying fallback interview start...');
-                    if (typeof fallbackStartInterview === 'function') {
-                        fallbackStartInterview();
-                    }
-                }
-            }, 1000); // Give page time to fully load
-
-            // Show manual start button after 5 seconds if auto-start didn't work
-            setTimeout(() => {
-                const robotElement = document.getElementById('robotAnimation');
-                if (robotElement && robotElement.style.display !== 'flex') {
-                    console.log('⚠️ Robot not visible after 5 seconds, showing manual start button');
-                    const manualBtn = document.getElementById('manualStartBtn');
-                    if (manualBtn) {
-                        manualBtn.style.display = 'inline-block';
-                    }
-                }
-            }, 5000);
-        } catch (criticalError) {
-            console.error('❌ Critical error in DOMContentLoaded:', criticalError);
-            // Show emergency manual start button
-            setTimeout(() => {
-                const manualBtn = document.getElementById('manualStartBtn');
-                if (manualBtn) {
-                    manualBtn.style.display = 'inline-block';
-                    manualBtn.textContent = '🚨 Start Interview (Error Recovery)';
                 }
             }, 1000);
+
+        } catch (error) {
+            console.error('❌ Initialization failure:', error);
+            const manualBtn = document.getElementById('manualStartBtn');
+            if (manualBtn) manualBtn.style.display = 'inline-block';
         }
+    });
 
+    // Request permissions button (optional - for camera access)
+    document.getElementById('requestPermissions').addEventListener('click', function () {
+        console.log('🎯 Enable Camera & Microphone button clicked');
+        interviewTimer.requestPermissions();
+    });
 
+    // Enable camera button
+    document.getElementById('enableCamera').addEventListener('click', function () {
+        console.log('🎯 Enable Camera button clicked');
+        startInterview();
+    });
 
-        // Request permissions button (optional - for camera access)
-        document.getElementById('requestPermissions').addEventListener('click', function () {
-            console.log('🎯 Enable Camera & Microphone button clicked');
-            interviewTimer.requestPermissions();
-        });
-
-        // Enable camera button
-        document.getElementById('enableCamera').addEventListener('click', function () {
-            console.log('🎯 Enable Camera button clicked');
-            interviewTimer.requestPermissions();
-        });
-
-        // Voice recognition event listeners
-        document.getElementById('voiceButton').addEventListener('click', function () {
-            if (!interviewTimer.permissionsGranted) {
-                alert('Please start the interview first by clicking "Start Interview"');
-                return;
-            }
-            if (typeof voiceRecognition !== 'undefined') {
-                voiceRecognition.startListening();
-                updateVoiceUI('listening');
-            } else {
-                alert('Voice recognition not available');
-            }
-        });
-
-        document.getElementById('stopVoiceButton').addEventListener('click', function () {
-            if (typeof voiceRecognition !== 'undefined') {
-                voiceRecognition.stopListening();
-                updateVoiceUI('stopped');
-            }
-        });
-
-        function updateVoiceUI(state) {
-            const voiceButton = document.getElementById('voiceButton');
-            const stopButton = document.getElementById('stopVoiceButton');
-            const status = document.getElementById('voiceStatus');
-            const visualizer = document.getElementById('visualizer');
-            const recordingIndicator = document.getElementById('recordingIndicator');
-
-            switch (state) {
-                case 'listening':
-                    voiceButton.style.display = 'none';
-                    stopButton.style.display = 'inline-block';
-                    status.textContent = 'Listening... Speak your response now';
-                    status.className = 'voice-status listening';
-                    if (visualizer) visualizer.style.display = 'block';
-                    if (recordingIndicator) recordingIndicator.style.display = 'block';
-                    break;
-                case 'stopped':
-                    voiceButton.style.display = 'inline-block';
-                    stopButton.style.display = 'none';
-                    status.textContent = 'Ready to speak your response';
-                    status.className = 'voice-status ready';
-                    if (visualizer) visualizer.style.display = 'none';
-                    if (recordingIndicator) recordingIndicator.style.display = 'none';
-                    break;
-                case 'error':
-                    voiceButton.style.display = 'inline-block';
-                    stopButton.style.display = 'none';
-                    status.textContent = 'Voice input error - try again';
-                    status.className = 'voice-status error';
-                    if (visualizer) visualizer.style.display = 'none';
-                    if (recordingIndicator) recordingIndicator.style.display = 'none';
-                    break;
-            }
+    // Voice recognition event listeners
+    document.getElementById('voiceButton').addEventListener('click', function () {
+        if (!interviewTimer.permissionsGranted) {
+            alert('Please start the interview first by clicking "Start Interview"');
+            return;
         }
-
-        // Update answer text when voice recognition returns results
         if (typeof voiceRecognition !== 'undefined') {
-            voiceRecognition.onResult = function (transcript) {
-                console.log('💬 Voice recognition result:', transcript);
-                const answerTextarea = document.getElementById('answer');
-                if (answerTextarea) {
-                    answerTextarea.value = transcript;
-                }
-                const voicePreview = document.getElementById('voicePreview');
-                if (voicePreview) {
-                    voicePreview.textContent = transcript;
-                }
-            };
+            voiceRecognition.startListening();
+            updateVoiceUI('listening');
+        } else {
+            alert('Voice recognition not available');
+        }
+    });
+
+    document.getElementById('stopVoiceButton').addEventListener('click', function () {
+        if (typeof voiceRecognition !== 'undefined') {
+            voiceRecognition.stopListening();
+            updateVoiceUI('stopped');
+        }
+    });
+
+    function updateVoiceUI(state) {
+        const voiceButton = document.getElementById('voiceButton');
+        const stopButton = document.getElementById('stopVoiceButton');
+        const status = document.getElementById('voiceStatus');
+        const visualizer = document.getElementById('visualizer');
+        const recordingIndicator = document.getElementById('recordingIndicator');
+
+        if (!status) return;
+
+        switch (state) {
+            case 'listening':
+                if (voiceButton) voiceButton.style.display = 'none';
+                if (stopButton) stopButton.style.display = 'inline-block';
+                status.textContent = 'Listening... Speak your response now';
+                status.className = 'voice-status listening';
+                if (visualizer) visualizer.style.display = 'block';
+                if (recordingIndicator) recordingIndicator.style.display = 'block';
+                break;
+            case 'stopped':
+                if (voiceButton) voiceButton.style.display = 'inline-block';
+                if (stopButton) stopButton.style.display = 'none';
+                status.textContent = 'Ready to speak your response';
+                status.className = 'voice-status ready';
+                if (visualizer) visualizer.style.display = 'none';
+                if (recordingIndicator) recordingIndicator.style.display = 'none';
+                break;
+            case 'error':
+                if (voiceButton) voiceButton.style.display = 'inline-block';
+                if (stopButton) stopButton.style.display = 'none';
+                status.textContent = 'Voice input error - try again';
+                status.className = 'voice-status error';
+                if (visualizer) visualizer.style.display = 'none';
+                if (recordingIndicator) recordingIndicator.style.display = 'none';
+                break;
+        }
+    }
+
+    // Update answer text when voice recognition returns results
+    if (typeof voiceRecognition !== 'undefined') {
+        voiceRecognition.onResult = function (transcript) {
+            console.log('💬 Voice recognition result:', transcript);
+            const answerTextarea = document.getElementById('answer');
+            if (answerTextarea) {
+                answerTextarea.value = transcript;
+            }
+            const voicePreview = document.getElementById('voicePreview');
+            if (voicePreview) {
+                voicePreview.textContent = transcript;
+            }
+        };
+    }
+
+    // Form submission handler
+    document.getElementById('answerForm').addEventListener('submit', function (e) {
+        e.preventDefault();
+        console.log('📤 Form submitted');
+
+        const answer = document.getElementById('answer').value;
+        if (!answer.trim()) {
+            document.getElementById('answer').value = '[No response provided]';
         }
 
-        // Form submission handler
-        document.getElementById('answerForm').addEventListener('submit', function (e) {
-            e.preventDefault();
-            console.log('📤 Form submitted');
+        // Stop all timers
+        interviewTimer.stopAllTimers();
 
-            const answer = document.getElementById('answer').value;
-            if (!answer.trim()) {
-                document.getElementById('answer').value = '[No response provided]';
-            }
+        // Stop voice recognition if available
+        if (typeof voiceRecognition !== 'undefined') {
+            voiceRecognition.stopListening();
+        }
 
-            // Stop all timers
-            interviewTimer.stopAllTimers();
+        // Stop TTS if available
+        textToSpeech.stop();
 
-            // Stop voice recognition if available
-            if (typeof voiceRecognition !== 'undefined') {
-                voiceRecognition.stopListening();
-            }
+        // Stop voice recognition and its media stream
+        if (typeof voiceRecognition !== 'undefined') {
+            voiceRecognition.stopListening();
+        }
 
-            // Stop TTS if available
-            textToSpeech.stop();
+        // Show loading
+        document.getElementById('loadingOverlay').style.display = 'flex';
 
-            // Stop voice recognition and its media stream
-            if (typeof voiceRecognition !== 'undefined') {
-                voiceRecognition.stopListening();
-            }
+        // Submit answer
+        const formData = new FormData(this);
 
-            // Show loading
-            document.getElementById('loadingOverlay').style.display = 'flex';
-
-            // Submit answer
-            const formData = new FormData(this);
-
-            fetch('/submit_answer', {
-                method: 'POST',
-                body: formData
+        fetch('/submit_answer', {
+            method: 'POST',
+            body: formData
+        })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok: ' + response.status);
+                }
+                return response.json();
             })
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error('Network response was not ok: ' + response.status);
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    console.log('✅ Submit answer response:', data);
-                    document.getElementById('loadingOverlay').style.display = 'none';
+            .then(data => {
+                console.log('✅ Submit answer response:', data);
+                document.getElementById('loadingOverlay').style.display = 'none';
 
-                    // Hide feedback section during interview (only show on completion)
-                    if (data.completed) {
-                        // Show feedback only when interview is completed
-                        document.getElementById('feedbackContent').innerHTML = `
+                // Hide feedback section during interview (only show on completion)
+                if (data.completed) {
+                    // Show feedback only when interview is completed
+                    document.getElementById('feedbackContent').innerHTML = `
                     <p><strong>Rishi Assessment:</strong> ${data.score}/10</p>
                     <p><strong>Feedback:</strong> ${data.feedback}</p>
                     <p style="margin-top: 1rem; font-weight: bold; color: #667eea;">🎉 Interview Completed! Redirecting to results...</p>
                 `;
 
-                        document.getElementById('feedbackSection').style.display = 'block';
-                        document.getElementById('feedbackSection').scrollIntoView({ behavior: 'smooth' });
+                    document.getElementById('feedbackSection').style.display = 'block';
+                    document.getElementById('feedbackSection').scrollIntoView({ behavior: 'smooth' });
 
-                        document.getElementById('nextQuestionBtn').textContent = 'View Results Now';
-                        document.getElementById('nextQuestionBtn').onclick = function () {
-                            interviewTimer.stopEverything();
-                            window.location.href = '/results';
-                        };
-                        document.querySelector('.auto-next-countdown').style.display = 'none';
+                    document.getElementById('nextQuestionBtn').textContent = 'View Results Now';
+                    document.getElementById('nextQuestionBtn').onclick = function () {
+                        interviewTimer.stopEverything();
+                        window.location.href = '/results';
+                    };
+                    document.querySelector('.auto-next-countdown').style.display = 'none';
 
-                        // Stop all media when interview is completed
-                        interviewTimer.stopAllMedia();
+                    // Stop all media when interview is completed
+                    interviewTimer.stopAllMedia();
 
-                        // Auto-redirect after 2 seconds
-                        setTimeout(() => {
-                            interviewTimer.stopEverything();
-                            window.location.href = '/results';
-                        }, 2000);
-                    } else {
-                        // During interview: hide feedback, auto-advance to next question
-                        document.getElementById('feedbackSection').style.display = 'none';
-                        // Load next question without reloading the page (keeps camera/mic stable)
-                        setTimeout(() => {
-                            interviewTimer.loadNextQuestion();
-                        }, 300);
-                    }
-                })
-                .catch(error => {
-                    console.error('❌ Error submitting answer:', error);
-                    document.getElementById('loadingOverlay').style.display = 'none';
-                    alert('Error submitting response. Please try again.');
-                });
-        });
+                    // Auto-redirect after 2 seconds
+                    setTimeout(() => {
+                        interviewTimer.stopEverything();
+                        window.location.href = '/results';
+                    }, 2000);
+                } else {
+                    // During interview: hide feedback, auto-advance to next question
+                    document.getElementById('feedbackSection').style.display = 'none';
+                    // Load next question without reloading the page (keeps camera/mic stable)
+                    setTimeout(() => {
+                        interviewTimer.loadNextQuestion();
+                    }, 300);
+                }
+            })
+            .catch(error => {
+                console.error('❌ Error submitting answer:', error);
+                document.getElementById('loadingOverlay').style.display = 'none';
+                alert('Error submitting response. Please try again.');
+            });
+    });
 
-        // Skip question
-        document.getElementById('skipButton').addEventListener('click', function () {
-            if (confirm('Are you sure you want to skip this question?')) {
-                document.getElementById('answer').value = '[Skipped]';
-                document.getElementById('answerForm').dispatchEvent(new Event('submit'));
-            }
-        });
 
-        // Clean up when page is unloaded (user navigates away or closes tab)
-        window.addEventListener('beforeunload', function () {
-            console.log('🚪 Page unloading - cleaning up media streams...');
-            interviewTimer.stopEverything();
-        });
+    // Clean up when page is unloaded (user navigates away or closes tab)
+    window.addEventListener('beforeunload', function () {
+        console.log('🚪 Page unloading - cleaning up media streams...');
+        interviewTimer.stopEverything();
+    });
 
-        // Clean up when page becomes hidden (tab switched, minimized, etc.)
-        document.addEventListener('visibilitychange', function () {
-            if (document.hidden) {
-                console.log('👁️ Page hidden - stopping media...');
-                // Optionally stop media when page is hidden
-                // interviewTimer.stopAllMedia();
-            }
-        });
+    // Clean up when page becomes hidden (tab switched, minimized, etc.)
+    document.addEventListener('visibilitychange', function () {
+        if (document.hidden) {
+            console.log('👁️ Page hidden - stopping media...');
+            // Optionally stop media when page is hidden
+            // interviewTimer.stopAllMedia();
+        }
+    });
 
-        // Handle page exit gracefully
-        window.addEventListener('pagehide', function () {
-            console.log('👋 Page hiding - cleaning up...');
-            interviewTimer.stopEverything();
-        });
+    // Handle page exit gracefully
+    window.addEventListener('pagehide', function () {
+        console.log('👋 Page hiding - cleaning up...');
+        interviewTimer.stopEverything();
+    });
 
-        // Enhanced CSS application on page load
-        window.addEventListener('load', function () {
-            // Apply CSS fixes after all resources are loaded
-            setTimeout(() => {
-                applyCSSFixes();
-                console.log('✅ CSS fixes applied after full page load');
-            }, 100);
-        });
+    // Enhanced CSS application on page load
+    window.addEventListener('load', function () {
+        // Apply CSS fixes after all resources are loaded
+        setTimeout(() => {
+            applyCSSFixes();
+            console.log('✅ CSS fixes applied after full page load');
+        }, 100);
+
 
         // Re-apply styles when DOM changes (for dynamic content)
         const observer = new MutationObserver(function (mutations) {
@@ -1889,134 +2074,123 @@
 </script>
 
 <style>
-    .permission-warning {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border-radius: 12px;
-        padding: 2rem;
-        margin-bottom: 2rem;
-        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
+    /* Premium Design System Overrides */
+    :root {
+        --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        --accent-gradient: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        --dark-bg: #1a1a2e;
+        --glass-bg: rgba(255, 255, 255, 0.05);
+        --glass-border: rgba(255, 255, 255, 0.1);
     }
 
-    .permission-warning .warning-content {
-        text-align: center;
+    body.interview-mode {
+        background-color: var(--dark-bg);
+        color: #e0e0e0;
+        font-family: 'Inter', 'Outfit', sans-serif;
     }
 
-    .permission-warning h4 {
-        font-size: 1.5rem;
-        margin-bottom: 1rem;
-        color: white;
+    .interview-room {
+        background: radial-gradient(circle at top right, #16213e, #1a1a2e);
+        min-height: 100vh;
+        padding-top: 2rem;
     }
 
-    .permission-steps {
-        background: rgba(255, 255, 255, 0.1);
-        padding: 1rem;
-        border-radius: 8px;
-        margin: 1.5rem 0;
-        text-align: left;
-    }
-
-    .permission-steps ol {
-        margin: 0.5rem 0;
-        padding-left: 1.5rem;
-    }
-
-    .permission-steps li {
-        margin: 0.5rem 0;
-    }
-
-    .btn-large {
-        padding: 12px 24px;
-        font-size: 1.1rem;
-        font-weight: bold;
-    }
-
-    .camera-placeholder {
-        background: #f8f9fa;
-        border: 3px dashed #dee2e6;
-        border-radius: 12px;
-        height: 400px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        margin: 1rem 0;
-    }
-
-    .placeholder-content {
-        text-align: center;
-    }
-
-    .placeholder-icon {
-        font-size: 4rem;
-        margin-bottom: 1rem;
-        opacity: 0.7;
-    }
-
-    .btn:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-    }
-
-    /* Chatbot Button Styles */
-    .chatbot-button-container {
-        text-align: center;
-        margin: 2rem 0;
-        animation: fadeIn 0.5s ease-out;
-    }
-
-    .chatbot-btn {
-        padding: 20px 40px;
-        font-size: 1.3rem;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        border-radius: 50px;
-        cursor: pointer;
-        box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
-        transition: all 0.3s ease;
-        animation: pulse 2s infinite;
-    }
-
-    .chatbot-btn:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 12px 35px rgba(102, 126, 234, 0.6);
-    }
-
-    .chatbot-btn:active {
-        transform: translateY(-1px);
-    }
-
-    /* Hide behavioral questions in interview mode */
-    body.interview-mode .question-card[style*="display: none"] {
-        display: none !important;
-    }
-
-    /* Answer Section Header */
-    .answer-section-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 1.5rem;
-        padding-bottom: 1rem;
-        border-bottom: 2px solid #e0e0e0;
-    }
-
-    .answer-section-header h4 {
-        margin: 0;
-        font-size: 1.5rem;
+    .interview-header h2 {
+        font-weight: 800;
         background: var(--primary-gradient);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        background-clip: text;
+        letter-spacing: -1px;
     }
 
-    /* Ensure answer section is hidden by default in interview mode */
-    body.interview-mode .answer-section {
-        display: none !important;
+    .video-container {
+        border-radius: 24px;
+        overflow: hidden;
+        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+        border: 1px solid var(--glass-border);
+        background: #000;
     }
 
-    body.interview-mode .answer-section[style*="display: block"] {
+    /* Live Analysis Panel Enhancement */
+    #physicalAnalysisIndicator {
+        background: rgba(26, 26, 46, 0.85) !important;
+        backdrop-filter: blur(15px) !important;
+        border: 1px solid var(--glass-border) !important;
+        border-radius: 20px !important;
+        padding: 20px !important;
+        width: 240px !important;
+    }
+
+    .analysis-item {
+        margin: 12px 0 !important;
+    }
+
+    .analysis-label {
+        font-size: 12px !important;
+        color: #aaa !important;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+
+    .analysis-value {
+        font-family: 'Monaco', monospace;
+        color: #fff !important;
+        font-size: 14px !important;
+    }
+
+    .analysis-bar {
+        background: rgba(255, 255, 255, 0.1) !important;
+        height: 4px !important;
+    }
+
+    /* Chatbot & Skip Buttons */
+    .chatbot-btn {
+        background: var(--primary-gradient);
+        border-radius: 12px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+    }
+
+    #skipButtonMain {
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid var(--glass-border);
+        color: #fff;
+        border-radius: 12px;
+        font-weight: 600;
+        backdrop-filter: blur(5px);
+    }
+
+    #skipButtonMain:hover {
+        background: rgba(255, 255, 255, 0.2);
+        transform: translateY(-2px);
+    }
+
+    /* Question Bubble Enhancement */
+    .ai-speech-bubble {
+        background: var(--glass-bg);
+        backdrop-filter: blur(10px);
+        border: 1px solid var(--glass-border);
+        border-radius: 20px;
+        padding: 25px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        max-width: 80%;
+    }
+
+    #aiQuestionText {
+        font-size: 1.25rem;
+        font-weight: 500;
+        line-height: 1.6;
+        color: #fff;
         display: block !important;
+        /* Failsafe */
+        visibility: visible !important;
+    }
+
+    .permission-warning {
+        background: var(--glass-bg);
+        backdrop-filter: blur(20px);
+        border: 1px solid var(--glass-border);
     }
 
     /* Physical Analysis Animation Styles */
@@ -2048,6 +2222,15 @@
 
     .animate-in {
         animation: slideInLeft 0.5s ease-out;
+    }
+
+    .visible {
+        display: block !important;
+        animation: fadeIn 0.4s ease-out;
+    }
+
+    .hidden {
+        display: none !important;
     }
 
     .analysis-item {

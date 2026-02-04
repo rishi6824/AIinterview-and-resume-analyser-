@@ -23,20 +23,20 @@ class Config:
     
     # Models for physical/behavioral analysis
     FACE_EMOTION_MODEL = 'trpakov/vit-face-expression'  # Face emotion detection
-    VOICE_EMOTION_MODEL = 'j-hartmann/emotion-english-distilroberta-base'  # Voice emotion
-    BODY_POSE_MODEL = 'facebook/detr-resnet-50'  # Body pose detection
+    VOICE_EMOTION_MODEL = 'ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition'  # Dedicated speech emotion
+    BODY_POSE_MODEL = 'facebook/detr-resnet-50'  # Object detection for posture
     
     # Physical analysis settings
     ENABLE_PHYSICAL_ANALYSIS = True
-    ANALYSIS_FRAME_INTERVAL = 2  # Analyze every 2 seconds
-    CONFIDENCE_WEIGHT = 0.4
-    VOICE_WEIGHT = 0.35
-    BODY_LANGUAGE_WEIGHT = 0.25
+    ANALYSIS_FRAME_INTERVAL = 3  # Increase interval slightly for better processing
+    CONFIDENCE_WEIGHT = 0.5  # Confidence is key
+    VOICE_WEIGHT = 0.3
+    BODY_LANGUAGE_WEIGHT = 0.2
     
     # Interview settings
-    MIN_QUESTIONS = 10
-    MAX_QUESTIONS = 15
-    DEFAULT_QUESTIONS = 12  # Default number of questions to generate
+    MIN_QUESTIONS = 5
+    MAX_QUESTIONS = 10
+    DEFAULT_QUESTIONS = 5  # Default number of questions to generate
     QUESTION_TIME_LIMIT = 60  # 1 minute per question
     ANSWER_TIME_LIMIT = 30  # 30 seconds for answering
     

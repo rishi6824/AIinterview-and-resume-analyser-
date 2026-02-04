@@ -7,7 +7,7 @@ class TextToSpeech {
         this.isMuted = false;
         this.voices = [];
         this.selectedVoice = null;
-        
+
         this.loadVoices();
         this.setupEventListeners();
     }
@@ -15,13 +15,13 @@ class TextToSpeech {
     loadVoices() {
         // Load available voices
         this.voices = this.synthesis.getVoices();
-        
+
         // Prefer a natural-sounding English voice
-        this.selectedVoice = this.voices.find(voice => 
-            voice.lang.includes('en') && 
+        this.selectedVoice = this.voices.find(voice =>
+            voice.lang.includes('en') &&
             (voice.name.includes('Google') || voice.name.includes('Natural') || voice.name.includes('Samantha'))
         ) || this.voices.find(voice => voice.lang.includes('en')) || this.voices[0];
-        
+
         // If voices aren't loaded yet, wait for them
         if (this.voices.length === 0) {
             this.synthesis.onvoiceschanged = () => {
@@ -50,17 +50,17 @@ class TextToSpeech {
 
             // Create new utterance
             this.utterance = new SpeechSynthesisUtterance(text);
-            
+
             // Configure voice
             if (this.selectedVoice) {
                 this.utterance.voice = this.selectedVoice;
             }
-            
+
             // Configure speech properties for interview context
             this.utterance.rate = 0.9;    // Slightly slower for clarity
             this.utterance.pitch = 1.0;   // Normal pitch
             this.utterance.volume = 1.0;  // Full volume
-            
+
             // Add slight pause for question number
             if (text.startsWith('Question')) {
                 this.utterance.rate = 0.85;
@@ -85,7 +85,14 @@ class TextToSpeech {
             };
 
             // Start speaking
-            this.synthesis.speak(this.utterance);
+            if (this.utterance instanceof SpeechSynthesisUtterance) {
+                this.synthesis.speak(this.utterance);
+            } else {
+                console.error('❌ Failed to create valid SpeechSynthesisUtterance');
+                this.isSpeaking = false;
+                this.updateAISpeakingUI(false);
+                resolve();
+            }
         });
     }
 
@@ -95,14 +102,14 @@ class TextToSpeech {
         const speechBubble = document.getElementById('aiSpeechBubble');
 
         if (speaking) {
-            aiSpeakingIndicator.style.display = 'flex';
-            statusText.textContent = 'AI is Asking Question';
-            speechBubble.classList.add('speaking');
+            if (aiSpeakingIndicator) aiSpeakingIndicator.style.display = 'flex';
+            if (statusText) statusText.textContent = 'AI is Asking Question';
+            if (speechBubble) speechBubble.classList.add('speaking');
         } else {
-            speechBubble.classList.remove('speaking');
+            if (speechBubble) speechBubble.classList.remove('speaking');
             // Keep indicator visible for a moment after speaking
             setTimeout(() => {
-                aiSpeakingIndicator.style.display = 'none';
+                if (aiSpeakingIndicator) aiSpeakingIndicator.style.display = 'none';
             }, 1000);
         }
     }
