@@ -73,6 +73,20 @@
                 <div id="physicalAnalysisPanel" class="analysis-panel">
                     <div class="analysis-header">📊 AI Real-time Analysis</div>
 
+                    <div class="live-status-row">
+                        <div class="status-badge" id="liveEmotion">
+                            <span class="dot"></span> Emotion: <span id="emotionVal">Neutral</span>
+                        </div>
+                        <div class="status-badge" id="physicalStatus">
+                            <span class="dot"></span> Status: <span id="statusVal">Ready</span>
+                        </div>
+                    </div>
+
+                    <div id="securityAlerts" class="security-alerts" style="display: none;">
+                        <div class="alert-title">⚠️ SECURITY ALERT</div>
+                        <ul id="violationsList"></ul>
+                    </div>
+
                     <div class="analysis-item">
                         <div class="analysis-label">Confidence</div>
                         <div class="analysis-bar-container">
@@ -775,6 +789,45 @@
         font-size: 0.75rem;
     }
 
+    .live-status-row {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 12px;
+        flex-wrap: wrap;
+    }
+
+    .status-badge {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-size: 0.65rem;
+        font-weight: 700;
+        color: white;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        transition: all 0.3s;
+    }
+
+    .status-badge .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #00b894;
+        box-shadow: 0 0 5px #00b894;
+    }
+
+    .status-badge.warning .dot {
+        background: #fdcb6e;
+        box-shadow: 0 0 5px #fdcb6e;
+    }
+
+    .status-badge.danger .dot {
+        background: #ff7675;
+        box-shadow: 0 0 5px #ff7675;
+    }
+
     .analysis-footer {
         margin-top: 10px;
         padding-top: 5px;
@@ -798,6 +851,47 @@
 
     .score-low {
         color: #ff6666;
+    }
+
+    .security-alerts {
+        background: rgba(255, 71, 87, 0.2);
+        border: 1px solid #ff4757;
+        border-radius: 10px;
+        padding: 10px;
+        margin-bottom: 15px;
+        animation: shake 0.5s ease-in-out;
+    }
+
+    .alert-title {
+        color: #ff4757;
+        font-weight: 800;
+        font-size: 0.75rem;
+        margin-bottom: 5px;
+        text-align: center;
+    }
+
+    .security-alerts ul {
+        margin: 0;
+        padding-left: 15px;
+        color: #ff7675;
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
+
+    @keyframes shake {
+
+        0%,
+        100% {
+            transform: translateX(0);
+        }
+
+        25% {
+            transform: translateX(-5px);
+        }
+
+        75% {
+            transform: translateX(5px);
+        }
     }
 
     /* Responsive */
@@ -850,7 +944,7 @@
             if (this.isCollecting) return;
             this.isCollecting = true;
             this.frameInterval = setInterval(() => this.captureFrame(), this.analysisInterval);
-            
+
             if (this.mediaRecorder) {
                 this.mediaRecorder.start(this.analysisInterval);
             }
@@ -897,7 +991,8 @@
             } catch (e) { console.error("Analysis sync error:", e); }
         }
 
-        updateUI(currentAnalysis) {
+        updateUI(data) {
+            const currentAnalysis = data.current_analysis;
             const update = (id, barId, val) => {
                 const el = document.getElementById(id);
                 const bar = document.getElementById(barId);
@@ -918,6 +1013,47 @@
 
             const overall = document.getElementById('physicalScoreValue');
             if (overall) overall.innerText = `${currentAnalysis.overall_physical_score.toFixed(1)}/10`;
+
+            // Update Real-time Emotion
+            const emotionVal = document.getElementById('emotionVal');
+            if (emotionVal) emotionVal.innerText = data.latest_emotion || "Neutral";
+
+            // Update Physical Status
+            const statusVal = document.getElementById('statusVal');
+            const physicalStatusBadge = document.getElementById('physicalStatus');
+            if (statusVal && physicalStatusBadge) {
+                let status = "Face Detected";
+                physicalStatusBadge.classList.remove('warning', 'danger');
+
+                if (data.phone_detected) {
+                    status = "Phone Detected!";
+                    physicalStatusBadge.classList.add('danger');
+                } else if (data.person_count > 1) {
+                    status = "Multi-Person!";
+                    physicalStatusBadge.classList.add('warning');
+                } else if (data.person_count === 0) {
+                    status = "No Face Detected";
+                    physicalStatusBadge.classList.add('warning');
+                }
+                statusVal.innerText = status;
+            }
+
+            // Update security alerts
+            const alertBox = document.getElementById('securityAlerts');
+            const violationsList = document.getElementById('violationsList');
+            if (alertBox && violationsList) {
+                if (currentAnalysis.violations && currentAnalysis.violations.length > 0) {
+                    violationsList.innerHTML = '';
+                    currentAnalysis.violations.forEach(v => {
+                        const li = document.createElement('li');
+                        li.innerText = v;
+                        violationsList.appendChild(li);
+                    });
+                    alertBox.style.display = 'block';
+                } else {
+                    alertBox.style.display = 'none';
+                }
+            }
         }
     }
 

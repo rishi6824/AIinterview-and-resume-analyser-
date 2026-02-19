@@ -51,56 +51,46 @@ class PhysicalAnalyzer:
             # Analyze face emotions
             emotion_scores = self._analyze_face_emotion(image_data, headers)
             
-            # Analyze body posture
-            posture_score = self._analyze_body_posture(image_data, headers)
+            # Analyze objects (person counting and phone detection)
+            object_results = self._analyze_objects(image_data, headers)
             
             # Calculate confidence based on facial expressions
             confidence = self._calculate_confidence(emotion_scores)
             
             return {
                 'emotions': emotion_scores,
-                'posture_score': posture_score,
-                'confidence': confidence
+                'posture_score': object_results.get('posture_score', 5.0),
+                'confidence': confidence,
+                'person_count': object_results.get('person_count', 0),
+                'phone_detected': object_results.get('phone_detected', False)
             }
             
         except Exception as e:
             print(f"Error analyzing video frame: {e}")
             return None
-    
+
     def _analyze_face_emotion(self, image_data, headers):
-        """Analyze facial expressions using facial emotion model"""
+        """Analyze facial emotions using Hugging Face model"""
         try:
-            payload = {
-                "inputs": f"data:image/jpeg;base64,{image_data}"
-            }
-            
+            payload = {"inputs": f"data:image/jpeg;base64,{image_data}"}
             api_endpoint = f"https://api-inference.huggingface.co/models/{self.face_emotion_model}"
             
-            response = requests.post(
-                api_endpoint,
-                headers=headers,
-                json=payload,
-                timeout=12
-            )
+            response = requests.post(api_endpoint, headers=headers, json=payload, timeout=12)
             
             if response.status_code == 200:
                 result = response.json()
-                if not result: return {}
-                
-                # Model returns list of {label: x, score: y}
-                emotions = {}
+                # trpakov/vit-face-expression returns list of dicts with label and score
                 if isinstance(result, list):
-                    for item in result:
-                        label = item.get('label', '').lower()
-                        score = item.get('score', 0)
-                        emotions[label] = score
-                return emotions
+                    emotions = {item['label'].lower(): item['score'] for item in result}
+                    return emotions
+            else:
+                print(f"Face API Error: {response.status_code} - {response.text}")
         except Exception as e:
             print(f"Error in face emotion analysis: {e}")
         return {}
 
-    def _analyze_body_posture(self, image_data, headers):
-        """Analyze body posture and detect significant movement"""
+    def _analyze_objects(self, image_data, headers):
+        """Detect persons and cell phones in the frame"""
         try:
             payload = {"inputs": f"data:image/jpeg;base64,{image_data}"}
             api_endpoint = f"https://api-inference.huggingface.co/models/{self.body_pose_model}"
@@ -110,11 +100,20 @@ class PhysicalAnalyzer:
             if response.status_code == 200:
                 result = response.json()
                 
-                # Accuracy improvement: Check for person presence and bounding box stability
                 posture_score = 6.0 # Base neutral
+                person_count = 0
+                phone_detected = False
                 
                 if isinstance(result, list):
+                    # Count persons
                     persons = [item for item in result if 'person' in item.get('label', '').lower()]
+                    person_count = len(persons)
+                    
+                    # Detect mobile phones
+                    phones = [item for item in result if 'phone' in item.get('label', '').lower()]
+                    if phones:
+                        phone_detected = True
+                    
                     if persons:
                         # Clear person detected = better posture score
                         posture_score += 2.0
@@ -133,11 +132,28 @@ class PhysicalAnalyzer:
                         self._prev_box = box
                     else:
                         posture_score = 4.0 # Person not clearly in frame
+                    
+                    # Penalize if more than one person detected
+                    if person_count > 1:
+                        posture_score -= 3.0
+                    
+                    # Heavily penalize if phone detected
+                    if phone_detected:
+                        posture_score -= 4.0
                 
-                return min(10.0, max(0.0, posture_score))
+                return {
+                    'posture_score': min(10.0, max(0.0, posture_score)),
+                    'person_count': person_count,
+                    'phone_detected': phone_detected
+                }
         except Exception as e:
-            print(f"Error in body posture analysis: {e}")
-        return 5.0
+            print(f"Error in object analysis: {e}")
+        return {'posture_score': 5.0, 'person_count': 1, 'phone_detected': False}
+
+    def _analyze_body_posture(self, image_data, headers):
+        """Deprecated: use _analyze_objects instead"""
+        res = self._analyze_objects(image_data, headers)
+        return res.get('posture_score', 5.0)
 
     def _calculate_confidence(self, emotion_scores):
         """Refined confidence calculation for interview context"""
@@ -189,9 +205,32 @@ class PhysicalAnalyzer:
                 if isinstance(result, list):
                     emotions = {item['label'].lower(): item['score'] for item in result}
                     return emotions
+            else:
+                print(f"Voice API Error: {response.status_code} - {response.text}")
         except Exception as e:
             print(f"Error in voice emotion analysis: {e}")
         return {}
+
+    def analyze_audio(self, audio_data):
+        """Analyze audio for voice confidence and quality"""
+        try:
+            headers = {
+                "Authorization": f"Bearer {self.api_key}"
+            }
+            
+            # Analyze voice emotion
+            emotion_data = self._analyze_voice_emotion(audio_data, headers)
+            
+            # Calculate voice score based on confidence in speech
+            voice_score = self._analyze_speech_quality(audio_data, emotion_data)
+            
+            return {
+                'emotions': emotion_data,
+                'voice_score': voice_score
+            }
+        except Exception as e:
+            print(f"Error analyzing audio: {e}")
+            return {'emotions': {}, 'voice_score': 5.0}
 
     def _analyze_speech_quality(self, audio_data, emotion_data):
         """Improved speech quality analysis using emotion labels"""
@@ -213,11 +252,16 @@ class PhysicalAnalyzer:
             # Video analysis
             conf_scores = []
             posture_scores = []
+            person_counts = []
+            phone_detected_flags = []
+            
             for frame in video_frames:
                 fa = self.analyze_video_frame(frame)
                 if fa:
                     conf_scores.append(fa.get('confidence', 5.0))
                     posture_scores.append(fa.get('posture_score', 5.0))
+                    person_counts.append(fa.get('person_count', 1))
+                    phone_detected_flags.append(fa.get('phone_detected', False))
             
             # Audio analysis
             voice_scores = []
@@ -231,29 +275,45 @@ class PhysicalAnalyzer:
             avg_posture = np.mean(posture_scores) if posture_scores else self.current_analysis['body_language']
             avg_voice = np.mean(voice_scores) if voice_scores else self.current_analysis['voice_quality']
             
+            max_person_count = max(person_counts) if person_counts else 1
+            any_phone_detected = any(phone_detected_flags) if phone_detected_flags else False
+            
             # Apply weighted score
             overall = (avg_conf * Config.CONFIDENCE_WEIGHT + 
                        avg_voice * Config.VOICE_WEIGHT + 
                        avg_posture * Config.BODY_LANGUAGE_WEIGHT)
+            
+            # Additional security violations check
+            violations = []
+            if any_phone_detected:
+                violations.append("Mobile phone detected")
+            
+            if max_person_count == 0:
+                violations.append("No face detected")
+            elif max_person_count > 1:
+                violations.append(f"Multiple people detected ({max_person_count})")
             
             self.current_analysis = {
                 'confidence': round(float(avg_conf), 2),
                 'voice_quality': round(float(avg_voice), 2),
                 'body_language': round(float(avg_posture), 2),
                 'overall_physical_score': round(float(overall), 2),
+                'person_count': max_person_count,
+                'phone_detected': any_phone_detected,
+                'violations': violations,
                 'details': {
                     'confidence_history': conf_scores,
                     'voice_history': voice_scores,
-                    'posture_history': posture_scores
+                    'posture_history': posture_scores,
+                    'person_counts': person_counts,
+                    'phone_detections': phone_detected_flags
                 }
             }
             return self.current_analysis
         except Exception as e:
             print(f"Error in realtime analysis: {e}")
-            return self.current_analysis
-            
-        except Exception as e:
-            print(f"Error in realtime analysis: {e}")
+            import traceback
+            traceback.print_exc()
             return self.current_analysis
     
     def get_analysis_summary(self):

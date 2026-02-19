@@ -11,9 +11,21 @@ from models.resume_analyzer import ResumeAnalyzer
 from utils.helpers import allowed_file, calculate_score, clean_text
 import secrets
 import ssl
+from functools import wraps
 
 app = Flask(__name__)
 app.config.from_object(Config)
+
+# Admin credentials (simple for now as requested)
+ADMIN_PASSWORD = "123456"
+
+def require_admin(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get('admin_logged_in'):
+            return redirect(url_for('admin_login', next=request.url))
+        return f(*args, **kwargs)
+    return decorated_function
 
 # Create upload directory
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -36,6 +48,27 @@ def after_request(response):
 @app.route('/')
 def index():
     return render_template('index.html')
+
+@app.route('/admin_login', methods=['GET', 'POST'])
+def admin_login():
+    """Admin login page"""
+    error = None
+    if request.method == 'POST':
+        password = request.form.get('password')
+        if password == ADMIN_PASSWORD:
+            session['admin_logged_in'] = True
+            next_url = request.args.get('next') or url_for('admin')
+            return redirect(next_url)
+        else:
+            error = "Invalid password"
+    
+    return render_template('admin_login.html', error=error)
+
+@app.route('/admin_logout')
+def admin_logout():
+    """Logout admin"""
+    session.pop('admin_logged_in', None)
+    return redirect(url_for('index'))
 
 @app.route('/analyze_resume', methods=['GET', 'POST'])
 def analyze_resume():
@@ -571,10 +604,16 @@ def update_physical_analysis():
                 'voice_quality': 0.0,
                 'body_language': 0.0,
                 'overall_physical_score': 0.0,
+                'person_count': 1,
+                'phone_detected': False,
+                'violations': [],
                 'details': {
                     'confidence_scores': [],
                     'voice_scores': [],
                     'posture_scores': [],
+                    'person_counts': [],
+                    'phone_detections': [],
+                    'emotion_history': [],
                     'frame_count': 0,
                     'audio_segment_count': 0
                 }
@@ -589,6 +628,13 @@ def update_physical_analysis():
             if frame_analysis:
                 details['confidence_scores'].append(frame_analysis.get('confidence', 5.0))
                 details['posture_scores'].append(frame_analysis.get('posture_score', 5.0))
+                details['person_counts'].append(frame_analysis.get('person_count', 1))
+                details['phone_detections'].append(frame_analysis.get('phone_detected', False))
+                
+                # Track raw emotions breakdown
+                if frame_analysis.get('emotions'):
+                    details['emotion_history'].append(frame_analysis['emotions'])
+                
                 details['frame_count'] += 1
                 
                 # Recalculate averages
@@ -600,6 +646,22 @@ def update_physical_analysis():
                     current_data['body_language'] = round(
                         sum(details['posture_scores']) / len(details['posture_scores']), 2
                     )
+                
+                # Update person count and phone detection
+                current_data['person_count'] = max(details['person_counts']) if details['person_counts'] else 1
+                current_data['phone_detected'] = any(details['phone_detections']) if details['phone_detections'] else False
+                
+                # Update violations
+                violations = []
+                if current_data['phone_detected']:
+                    violations.append("Mobile phone detected")
+                
+                if current_data['person_count'] == 0:
+                    violations.append("No face detected")
+                elif current_data['person_count'] > 1:
+                    violations.append(f"Multiple people detected ({current_data['person_count']})")
+                
+                current_data['violations'] = violations
         
         # Analyze audio segment if provided
         if audio_segment:
@@ -621,9 +683,19 @@ def update_physical_analysis():
              current_data['body_language'] * Config.BODY_LANGUAGE_WEIGHT), 2
         )
         
+        # Get latest emotion for real-time display
+        latest_emotion = "Neutral"
+        if details['emotion_history']:
+            last_emotions = details['emotion_history'][-1]
+            if last_emotions:
+                latest_emotion = max(last_emotions.items(), key=lambda x: x[1])[0].capitalize()
+
         return jsonify({
             'success': True,
             'current_analysis': current_data,
+            'latest_emotion': latest_emotion,
+            'person_count': current_data['person_count'],
+            'phone_detected': current_data['phone_detected'],
             'summary': {
                 'confidence': current_data['confidence'],
                 'voice_quality': current_data['voice_quality'],
@@ -659,6 +731,55 @@ def results():
     percentage = (total_score / max_possible * 100) if max_possible > 0 else 0
     candidate_name = session.get('candidate_name', 'Candidate')
     
+    # Aggregate physical analysis data from responses
+    responses_history = session.get('responses', [])
+    avg_confidence = 0
+    avg_voice = 0
+    avg_posture = 0
+    total_violations = []
+    all_emotions = []
+    
+    physical_count = 0
+    for resp in responses_history:
+        pa = resp.get('physical_analysis')
+        if pa:
+            conf = pa.get('confidence', 0)
+            voice = pa.get('voice_quality', 0)
+            posture = pa.get('body_language', 0)
+            
+            avg_confidence += conf
+            avg_voice += voice
+            avg_posture += posture
+            physical_count += 1
+            
+            if pa.get('violations'):
+                total_violations.extend(pa['violations'])
+            if pa.get('details', {}).get('emotion_history'):
+                all_emotions.extend(pa['details']['emotion_history'])
+    
+    if physical_count > 0:
+        avg_confidence = round(avg_confidence / physical_count, 1)
+        avg_voice = round(avg_voice / physical_count, 1)
+        avg_posture = round(avg_posture / physical_count, 1)
+    
+    # Calculate average emotion profile
+    emotion_profile = {}
+    if all_emotions:
+        # Get list of all emotion labels
+        possible_emotions = []
+        for frame_emotions in all_emotions:
+            possible_emotions.extend(frame_emotions.keys())
+        possible_emotions = list(set(possible_emotions))
+        
+        for emotion in possible_emotions:
+            scores = [f.get(emotion, 0) for f in all_emotions]
+            avg_score = sum(scores) / len(scores)
+            if avg_score > 0.05: # Only include significant emotions
+                emotion_profile[emotion.capitalize()] = round(float(avg_score * 100), 1)
+        
+        # Sort by impact
+        emotion_profile = dict(sorted(emotion_profile.items(), key=lambda x: x[1], reverse=True))
+
     # Generate overall feedback
     overall_feedback = ai_interviewer.generate_overall_feedback(
         session['responses'], session.get('resume_analysis', {})
@@ -677,7 +798,14 @@ def results():
         'overall_feedback': overall_feedback,
         'start_time': session.get('start_time'),
         'end_time': datetime.now().isoformat(),
-        'physical_analysis': session.get('physical_analysis', {})
+        'physical_summary': {
+            'avg_confidence': avg_confidence,
+            'avg_voice': avg_voice,
+            'avg_posture': avg_posture,
+            'violations_count': len(total_violations),
+            'unique_violations': list(set(total_violations)),
+            'emotion_profile': emotion_profile
+        }
     }
     
     # Save prediction scores to file (JSON format)
@@ -692,13 +820,10 @@ def results():
     
     return render_template('results.html',
                          candidate_name=candidate_name,
-                         score=total_score,
-                         percentage=percentage,
-                         responses=session['responses'],
-                         overall_feedback=overall_feedback,
-                         resume_analysis=session.get('resume_analysis'))
+                         responses=session.get('responses', []))
 
 @app.route('/admin')
+@require_admin
 def admin():
     """Admin panel to view all interview predictions with full statistics"""
     try:
@@ -776,6 +901,7 @@ def admin():
         return f"Admin Panel Error: {e}", 500
 
 @app.route('/admin/interview/<interview_id>')
+@require_admin
 def admin_interview_detail(interview_id):
     """View detailed interview results from JSON files"""
     try:
@@ -792,7 +918,8 @@ def admin_interview_detail(interview_id):
                         'status': 'completed',
                         'start_time': data.get('start_time'),
                         'end_time': data.get('end_time'),
-                        'overall_score': data.get('total_score', 0) / data.get('total_questions', 1) if data.get('total_questions', 0) > 0 else 0
+                        'overall_score': data.get('total_score', 0) / data.get('total_questions', 1) if data.get('total_questions', 0) > 0 else 0,
+                        'physical_summary': data.get('physical_summary', {})
                     }
                     return render_template('admin_interview_detail.html',
                                          interview=interview,
@@ -804,6 +931,7 @@ def admin_interview_detail(interview_id):
         return str(e), 500
 
 @app.route('/admin/delete/<interview_id>', methods=['POST'])
+@require_admin
 def admin_delete_interview(interview_id):
     """Delete an interview JSON record"""
     try:

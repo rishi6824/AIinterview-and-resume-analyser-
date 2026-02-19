@@ -34,7 +34,8 @@
                 <div class="breakdown-item">
                     <span class="label">Skills</span>
                     <div class="progress-bg">
-                        <div class="progress-fill" style="width: {{ (analysis.scores.skills_score / 10) * 100 }}%">
+                        <div class="progress-fill"
+                            style="width:{{ (analysis.scores.skills_score|default(0) * 10)|round }}%;">
                         </div>
                     </div>
                     <span class="value">{{ "%.1f"|format(analysis.scores.skills_score) }}</span>
@@ -42,7 +43,8 @@
                 <div class="breakdown-item">
                     <span class="label">Experience</span>
                     <div class="progress-bg">
-                        <div class="progress-fill" style="width: {{ (analysis.scores.experience_score / 10) * 100 }}%">
+                        <div class="progress-fill"
+                            style="width:{{ (analysis.scores.experience_score|default(0) * 10)|round }}%;">
                         </div>
                     </div>
                     <span class="value">{{ "%.1f"|format(analysis.scores.experience_score) }}</span>
@@ -50,7 +52,8 @@
                 <div class="breakdown-item">
                     <span class="label">Education</span>
                     <div class="progress-bg">
-                        <div class="progress-fill" style="width: {{ (analysis.scores.education_score / 10) * 100 }}%">
+                        <div class="progress-fill"
+                            style="width:{{ (analysis.scores.education_score|default(0) * 10)|round }}%;">
                         </div>
                     </div>
                     <span class="value">{{ "%.1f"|format(analysis.scores.education_score) }}</span>
